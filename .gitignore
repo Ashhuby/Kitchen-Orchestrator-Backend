@@ -1,16 +1,28 @@
-# Godot 4+ specific ignores
-.godot/
-.nomedia
+# --- C# / .NET / IDE stuffs ---
+bin/
+obj/
+*.sln
+*.csproj.user
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.doccache
 
-# Godot-specific ignores
-.import/
-export.cfg
-export_credentials.cfg
+# --- Secrets & Infrastructure  ---
+.env
+appsettings.Development.json
+*.p12
+*.pem
+*.pfx
+secrets.json
+steam_appid.txt
+docker-compose.override.yml
 
-# Imported translations (automatically generated from CSV files)
-*.translation
-
-# Mono-specific ignores
-.mono/
-data_*/
-mono_crash.*.json
+# --- Logs & OS ---
+logs/
+*.log
+.DS_Store
+Thumbs.db
