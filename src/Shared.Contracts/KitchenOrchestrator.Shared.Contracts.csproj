@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>KitchenOrchestrator.Shared.Contracts</RootNamespace>
+    <AssemblyName>KitchenOrchestrator.Shared.Contracts</AssemblyName>
+    <!-- Zero NuGet dependencies. This project must remain a plain C# library.
+         No EF Core. No ASP.NET. No Godot. Every other project references this. -->
+  </PropertyGroup>
+
+</Project>

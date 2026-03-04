@@ -1,7 +1,7 @@
 # Kitchen Orchestrator
 
 A server-authoritative multiplayer co-op cooking game built for Steam.
-Backend engineering portfolio piece demonstrating distributed systems, security, and scalable architecture.
+Created to learn more and demonstrate my understaning of distributed systems, security, and scalable architecture.
 
 ## Stack
 

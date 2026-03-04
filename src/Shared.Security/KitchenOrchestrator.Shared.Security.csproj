@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>KitchenOrchestrator.Shared.Security</RootNamespace>
+    <AssemblyName>KitchenOrchestrator.Shared.Security</AssemblyName>
+    <!-- Only dependency: Microsoft's portable JWT library.
+         Deliberately NOT Microsoft.AspNetCore.Authentication.JwtBearer.
+         This must work inside a headless Godot C# process. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Contracts\KitchenOrchestrator.Shared.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.6.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.6.0" />
+  </ItemGroup>
+
+</Project>
