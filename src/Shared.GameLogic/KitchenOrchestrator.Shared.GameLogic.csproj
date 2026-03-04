@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>KitchenOrchestrator.Shared.GameLogic</RootNamespace>
+    <AssemblyName>KitchenOrchestrator.Shared.GameLogic</AssemblyName>
+    <!-- Pure game logic — recipes, scoring, order rules.
+         No I/O, no rendering, no network. References Contracts only.
+         Both GameServer and GameClient reference this. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Contracts\KitchenOrchestrator.Shared.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>KitchenOrchestrator.GameServer</RootNamespace>
+    <AssemblyName>KitchenOrchestrator.GameServer</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <!-- Plain .NET 8 console — no ASP.NET, no EF Core.
+         The GameServer is a Godot headless export in production.
+         This .csproj allows the Shared library code to be compiled
+         and tested as part of the solution without Godot being installed.
+         Godot-specific classes (Node, ENetMultiplayerPeer etc.) will be
+         added when the Godot project is wired up. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Contracts\KitchenOrchestrator.Shared.Contracts.csproj" />
+    <ProjectReference Include="..\Shared.Security\KitchenOrchestrator.Shared.Security.csproj" />
+    <ProjectReference Include="..\Shared.GameLogic\KitchenOrchestrator.Shared.GameLogic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- HttpClient for posting match results to IdentityAPI -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

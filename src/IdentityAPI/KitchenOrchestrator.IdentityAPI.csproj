@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>KitchenOrchestrator.IdentityAPI</RootNamespace>
+    <AssemblyName>KitchenOrchestrator.IdentityAPI</AssemblyName>
+    <UserSecretsId>kitchen-orchestrator-identity-api</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Contracts\KitchenOrchestrator.Shared.Contracts.csproj" />
+    <ProjectReference Include="..\Shared.Security\KitchenOrchestrator.Shared.Security.csproj" />
+    <!-- Note: IdentityAPI does NOT reference Shared.GameLogic.
+         The API handles identity and persistence — it does not run game logic. -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- EF Core + PostgreSQL -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.7" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.7">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!-- JWT Bearer middleware (ASP.NET only — not in Shared.Security) -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.7" />
+
+    <!-- HttpClient for Steam Web API calls -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
