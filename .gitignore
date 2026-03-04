@@ -1,0 +1,46 @@
+# ── .NET / C# ──────────────────────────────────────────────
+[Oo]bj/
+[Bb]in/
+*.user
+*.suo
+.vs/
+**/Properties/launchSettings.json
+*.nupkg
+*.snupkg
+**/[Pp]ackages/
+nuget.config
+**/secrets.json
+**/appsettings.Development.json
+
+# ── Godot 4.x ──────────────────────────────────────────────
+src/GameClient/.godot/
+src/GameClient/.import/
+**/*.import
+src/GameClient/export/
+src/GameClient/.mono/
+src/GameClient/mono_crash.*.json
+
+# ── Docker / Secrets ───────────────────────────────────────
+.env
+.env.local
+.env.production
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+
+# ── OS ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ────────────────────────────────────────────────────
+.idea/
+*.swp
+.vscode/settings.json
+
+# ── Test results ───────────────────────────────────────────
+TestResults/
+*.trx
+coverage/
