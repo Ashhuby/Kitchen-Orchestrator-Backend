@@ -5,8 +5,8 @@ namespace KitchenOrchestrator.Shared.Contracts.Models
     {
         public Guid Id {get; set;} = Guid.Empty;
         public Guid MatchSessionId {get; set;} = Guid.Empty;
-        public DateTime MatchBegin {get; set;} = DateTime.MinValue;
-        public DateTime MatchEnd {get; set;} = DateTime.MinValue;
+        public DateTime MatchBeginUtc {get; set;} = DateTime.MinValue;
+        public DateTime MatchEndUtc {get; set;} = DateTime.MinValue;
         public string LevelId {get; set;} = string.Empty;
         public int FinalScore {get; set;} = 0;
         public int TargetScore {get; set;} = 0;
