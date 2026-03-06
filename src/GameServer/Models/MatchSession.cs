@@ -13,6 +13,9 @@ namespace KitchenOrchestrator.GameServer.Models
         public int TotalScore { get; set; }
         public List<ConnectedPlayer> Players { get; }
         public List<ActiveOrder> Orders { get; }
+        public int CompletedOrders { get; set; } = 0;
+        public int FailedOrders { get; set; } = 0;
+        public int PerfectOrders { get; set; } = 0;
 
         public MatchSession(LevelDefinition level)
         {
