@@ -16,6 +16,7 @@ namespace KitchenOrchestrator.GameServer.Models
         public int CompletedOrders { get; set; } = 0;
         public int FailedOrders { get; set; } = 0;
         public int PerfectOrders { get; set; } = 0;
+        public float TimeSinceLastOrderSpawn { get; set; } = 0f;
 
         public MatchSession(LevelDefinition level)
         {
