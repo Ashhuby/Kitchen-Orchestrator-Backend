@@ -1,9 +1,10 @@
-using KitchenOrchestrator.Shared.Contracts.DTOs;
-using KitchenOrchestrator.Shared.Security.Jwt;
-using KitchenOrchestrator.IdentityAPI.Configuration;
-using KitchenOrchestrator.IdentityAPI.Services;
+using KitchenOrchestrator.IdentityAPI.Services;     // For ISteamAuthService, IPlayerService
+using KitchenOrchestrator.Shared.Contracts.Models;  // For SteamAuthRequest, PlayerProfileDto, AuthResponse
+using KitchenOrchestrator.Shared.Security.Jwt;      // For JwtOptions, JwtUtility i moved namespaces whhoops hehe
+using KitchenOrchestrator.IdentityAPI.Configuration; // For SteamOptions
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 
 namespace KitchenOrchestrator.IdentityAPI.Controllers
 {
