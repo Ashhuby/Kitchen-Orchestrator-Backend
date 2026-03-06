@@ -1,4 +1,4 @@
-namespace KitchenOrchestrator.IdentityAPI.Configuration
+namespace KitchenOrchestrator.Shared.Security.Jwt
 {
     public class JwtOptions
     {
