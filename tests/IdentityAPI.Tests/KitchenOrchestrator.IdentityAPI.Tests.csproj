@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\IdentityAPI\KitchenOrchestrator.IdentityAPI.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.7" />
   </ItemGroup>
 
   <ItemGroup>
