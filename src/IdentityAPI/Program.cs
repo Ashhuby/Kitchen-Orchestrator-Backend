@@ -1,6 +1,7 @@
 using KitchenOrchestrator.IdentityAPI.Configuration;
 using KitchenOrchestrator.IdentityAPI.Data;
 using KitchenOrchestrator.IdentityAPI.Services;
+using KitchenOrchestrator.Shared.Security.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
