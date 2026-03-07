@@ -1,0 +1,34 @@
+services:
+  identity-api:
+    build:
+      context: .
+      dockerfile: src/IdentityAPI/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Jwt__Issuer=${JWT_ISSUER}
+      - Jwt__Audience=${JWT_AUDIENCE}
+      - Jwt__ExpiryHours=${JWT_EXPIRY_HOURS}
+      - Steam__PublisherKey=${STEAM_PUBLISHER_KEY}
+      - Steam__AppId=${STEAM_APP_ID}
+      - Steam__TicketVerificationUrl=${STEAM_TICKET_URL}
+      - ServerAuth__SharedSecret=${SERVER_AUTH_SECRET}
+
+  game-server:
+    build:
+      context: .
+      dockerfile: src/GameServer/Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Jwt__Issuer=${JWT_ISSUER}
+      - Jwt__Audience=${JWT_AUDIENCE}
+      - ServerAuth__SharedSecret=${SERVER_AUTH_SECRET}
+      - GameServer__IdentityApiBaseUrl=http://identity-api:8080
+    depends_on:
+      - identity-api
