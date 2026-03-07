@@ -1,10 +1,8 @@
-services:
+services:  # This should only appear ONCE at the top
   identity-api:
     build:
       context: .
       dockerfile: src/IdentityAPI/Dockerfile
-    ports:
-      - "5000:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
@@ -21,8 +19,6 @@ services:
     build:
       context: .
       dockerfile: src/GameServer/Dockerfile
-    ports:
-      - "5001:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - Jwt__SigningKey=${JWT_SIGNING_KEY}
@@ -32,3 +28,13 @@ services:
       - GameServer__IdentityApiBaseUrl=http://identity-api:8080
     depends_on:
       - identity-api
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - identity-api
+      - game-server
