@@ -1,8 +1,10 @@
-services:  # This should only appear ONCE at the top
+services:
   identity-api:
     build:
       context: .
       dockerfile: src/IdentityAPI/Dockerfile
+    ports:
+      - "5000:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
@@ -19,6 +21,8 @@ services:  # This should only appear ONCE at the top
     build:
       context: .
       dockerfile: src/GameServer/Dockerfile
+    ports:
+      - "5001:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - Jwt__SigningKey=${JWT_SIGNING_KEY}
