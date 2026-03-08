@@ -1,0 +1,19 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KitchenOrchestrator.GameClient.Godot", "KitchenOrchestrator.GameClient.Godot.csproj", "{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+	Debug|Any CPU = Debug|Any CPU
+	ExportDebug|Any CPU = ExportDebug|Any CPU
+	ExportRelease|Any CPU = ExportRelease|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.ExportDebug|Any CPU.ActiveCfg = ExportDebug|Any CPU
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.ExportDebug|Any CPU.Build.0 = ExportDebug|Any CPU
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.ExportRelease|Any CPU.ActiveCfg = ExportRelease|Any CPU
+		{D17E52D1-35DB-43EC-8DEA-04FED4E1C814}.ExportRelease|Any CPU.Build.0 = ExportRelease|Any CPU
+	EndGlobalSection
+EndGlobal
