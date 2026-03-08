@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://bxge3dg0u21mb"]
 
-[ext_resource type="Script" path="res://Scripts/LobbyScene.cs" id="1_mm7oa"]
+[ext_resource type="Script" path="res://Scripts/UI/LobbyScene.cs" id="1_oect7"]
 
 [node name="LobbyScene" type="Control"]
 layout_mode = 3
@@ -15,7 +15,7 @@ offset_right = 20.0
 offset_bottom = 20.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_mm7oa")
+script = ExtResource("1_oect7")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1

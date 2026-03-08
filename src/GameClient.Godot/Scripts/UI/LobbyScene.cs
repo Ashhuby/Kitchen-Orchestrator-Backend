@@ -1,5 +1,7 @@
 using Godot;
 using System;
+using KitchenOrchestrator.GameClient.Godot; // Ensure we have access to Bootstrap
+
 public partial class LobbyScene : Control
 {
     private Label _statusLabel = null!;
@@ -28,22 +30,22 @@ public partial class LobbyScene : Control
     {
         string displayName = _displayNameInput.Text;
         
+        // Keeping defensive check as requested
         if (string.IsNullOrWhiteSpace(displayName))
         {
             _statusLabel.Text = "Please enter a display name.";
             return;
         }
 
-        _statusLabel.Text = "Logging in...";
+        _statusLabel.Text = "Logging in (Dev Mode)...";
         _loginButton.Disabled = true;
 
-        // In a real build, "test_ticket" would be replaced by the 
-        // Hex ticket retrieved from Steamworks/GodotSteam.
-        bool success = await KitchenOrchestrator.GameClient.Godot.Bootstrap.Auth.LoginAsync("test_ticket", displayName);
+        // Swapped LoginAsync for DevLoginAsync to bypass Steam ticket requirement
+        bool success = await Bootstrap.Auth.DevLoginAsync(displayName);
 
         if (success)
         {
-            _statusLabel.Text = $"Logged in as {displayName}";
+            _statusLabel.Text = $"Logged in as {displayName} (DEV)";
             _connectButton.Disabled = false;
         }
         else
@@ -58,13 +60,13 @@ public partial class LobbyScene : Control
         _statusLabel.Text = "Connecting to match...";
         _connectButton.Disabled = true;
 
-        bool connected = await KitchenOrchestrator.GameClient.Godot.Bootstrap.Connection.ConnectAsync();
+        bool connected = await Bootstrap.Connection.ConnectAsync();
 
         if (connected)
         {
             try 
             {
-                await KitchenOrchestrator.GameClient.Godot.Bootstrap.Connection.JoinMatchAsync("map1");
+                await Bootstrap.Connection.JoinMatchAsync("map1");
                 _statusLabel.Text = "Waiting for match...";
             }
             catch (Exception ex)

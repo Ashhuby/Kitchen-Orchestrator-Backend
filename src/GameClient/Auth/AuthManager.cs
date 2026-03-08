@@ -54,6 +54,25 @@ namespace KitchenOrchestrator.GameClient.Auth
             }
         }
 
+        public async Task<bool> DevLoginAsync(string displayName)
+        {
+            // Mock auth bypass for development heheheh fake data
+            _state.Jwt = "dev-mock-jwt-token";
+            _state.TokenExpiresUtc = DateTime.UtcNow.AddHours(24);
+            
+            _state.Profile = new PlayerProfileDto(
+                Guid.NewGuid(),    // Id
+                displayName,       // DisplayName
+                0,                 // MatchesPlayed
+                0,                 // MatchesWon
+                0,                 // TotalScore
+                0                  // PerfectOrders
+            );
+
+            _state.IsAuthenticated = true;
+            return await Task.FromResult(true);
+        }
+
         public void Logout()
         {
             _state.Jwt = null;
