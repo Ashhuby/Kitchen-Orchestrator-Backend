@@ -1,6 +1,7 @@
 using Godot;
 using System;
-using KitchenOrchestrator.GameClient.Godot; // Ensure we have access to Bootstrap
+using System.Threading.Tasks;
+using KitchenOrchestrator.GameClient.Godot;
 
 public partial class LobbyScene : Control
 {
@@ -11,17 +12,14 @@ public partial class LobbyScene : Control
 
     public override void _Ready()
     {
-        // UI Node Initialization
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
         _displayNameInput = GetNode<LineEdit>("VBoxContainer/DisplayNameInput");
         _loginButton = GetNode<Button>("VBoxContainer/LoginButton");
         _connectButton = GetNode<Button>("VBoxContainer/ConnectButton");
 
-        // Initial UI State
         _connectButton.Disabled = true;
         _statusLabel.Text = "Ready to Login";
 
-        // Signal Wiring
         _loginButton.Pressed += OnLoginPressed;
         _connectButton.Pressed += OnConnectPressed;
     }
@@ -30,7 +28,6 @@ public partial class LobbyScene : Control
     {
         string displayName = _displayNameInput.Text;
         
-        // Keeping defensive check as requested
         if (string.IsNullOrWhiteSpace(displayName))
         {
             _statusLabel.Text = "Please enter a display name.";
@@ -40,7 +37,6 @@ public partial class LobbyScene : Control
         _statusLabel.Text = "Logging in (Dev Mode)...";
         _loginButton.Disabled = true;
 
-        // Swapped LoginAsync for DevLoginAsync to bypass Steam ticket requirement
         bool success = await Bootstrap.Auth.DevLoginAsync(displayName);
 
         if (success)
@@ -64,15 +60,33 @@ public partial class LobbyScene : Control
 
         if (connected)
         {
+            // Subscribe to the match start event
+            Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
+
             try 
             {
                 await Bootstrap.Connection.JoinMatchAsync("map1");
+
+                var timeout = DateTime.UtcNow.AddSeconds(5);
+                while (!Bootstrap.State.CurrentSessionId.HasValue && DateTime.UtcNow < timeout)
+                {
+                    await Task.Delay(100);
+                }
+
+                if (!Bootstrap.State.CurrentSessionId.HasValue)
+                {
+                    _statusLabel.Text = "Join Match timed out";
+                    _connectButton.Disabled = false;
+                    return;
+                }
+
+                await Bootstrap.Connection.SendReadyAsync(Bootstrap.State.CurrentSessionId.Value);
                 _statusLabel.Text = "Waiting for match...";
             }
             catch (Exception ex)
             {
                 _statusLabel.Text = "Join Match failed";
-                Console.WriteLine($"Join Match Error: {ex.Message}");
+                GD.PrintErr($"Join Match Error: {ex.Message}");
                 _connectButton.Disabled = false;
             }
         }
@@ -81,5 +95,17 @@ public partial class LobbyScene : Control
             _statusLabel.Text = "Connection failed";
             _connectButton.Disabled = false;
         }
+    }
+
+    // Handler invoked from GameConnection's SignalR thread
+    private void OnMatchStarted(Guid sessionId)
+    {
+        // Safe cross-thread UI update via Godot's main thread
+        CallDeferred(nameof(UpdateStatusForMatchStart));
+    }
+
+    private void UpdateStatusForMatchStart()
+    {
+        _statusLabel.Text = "Match Started!";
     }
 }

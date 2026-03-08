@@ -14,9 +14,6 @@ namespace KitchenOrchestrator.GameServer.Services
     {
         private readonly JwtOptions _jwtOptions;
         private readonly IWebHostEnvironment _environment;
-        
-        // A stable GUID for the DevPlayer to ensure identity consistency during a session
-        private static readonly Guid DevPlayerId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
         public JwtValidationService(IOptions<JwtOptions> jwtOptions, IWebHostEnvironment environment)
         {
@@ -31,8 +28,10 @@ namespace KitchenOrchestrator.GameServer.Services
             // Dev bypass - only active if ASPNETCORE_ENVIRONMENT is 'Development'
             if (_environment.IsDevelopment() && token == "dev-mock-jwt-token")
             {
+                // Generate a unique ID for every call so simultaneous 
+                // test clients aren't treated as the same player
                 return new PlayerTokenClaims(
-                    DevPlayerId,
+                    Guid.NewGuid(), 
                     "dev-steam-id",
                     "DevPlayer"
                 );

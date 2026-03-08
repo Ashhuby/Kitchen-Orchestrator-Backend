@@ -1,6 +1,7 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.GameServer.Services;
 using KitchenOrchestrator.Shared.Contracts.Enums;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -21,13 +22,12 @@ namespace KitchenOrchestrator.GameServer.Hubs
             _sessionService = sessionService;
             _logger = logger;
         }
+
         public override async Task OnConnectedAsync()
         {
             var httpContext = Context.GetHttpContext();
-            // Use the null-coalescing operator or a direct check
             string? token = httpContext?.Request.Query["access_token"];
 
-            // heck if token is null or empty first
             if (string.IsNullOrEmpty(token))
             {
                 _logger.LogWarning("Connection attempt without a token. Aborting {ConnectionId}", Context.ConnectionId);
@@ -35,9 +35,8 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            // Now 'token' is guaranteed not to be null for the Validate method
             var claims = _jwtValidation.Validate(token);
-            
+
             if (claims == null)
             {
                 _logger.LogWarning("Invalid JWT provided for {ConnectionId}", Context.ConnectionId);
@@ -45,14 +44,13 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            // Store claims...
             Context.Items["PlayerId"] = claims.PlayerId;
             Context.Items["SteamId"] = claims.SteamId;
             Context.Items["DisplayName"] = claims.DisplayName;
 
             await base.OnConnectedAsync();
         }
-        
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             _logger.LogInformation("Connection {ConnectionId} disconnected.", Context.ConnectionId);
@@ -67,7 +65,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var displayName = (string)Context.Items["DisplayName"]!;
 
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
-            
+
             var session = _sessionService.GetOrCreateSession(levelId);
             _sessionService.AddPlayerToSession(session.SessionId, player);
 
@@ -86,8 +84,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             player.IsReady = true;
 
             bool shouldStart = false;
-            
-            // Fixed: Lock logic only wraps synchronous state changes to prevent async deadlocks
+
             lock (session.Players)
             {
                 bool allReady = session.Players.All(p => p.IsReady);
