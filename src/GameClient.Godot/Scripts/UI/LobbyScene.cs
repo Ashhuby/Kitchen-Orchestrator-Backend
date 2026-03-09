@@ -30,10 +30,10 @@ public partial class LobbyScene : Control
         _statusLabel.Text = "Connected to Server";
 
         // Setup Map Options
-        _mapOptionButton.Clear();
-        _mapOptionButton.AddItem("Salad Bar", 0);   
-        _mapOptionButton.AddItem("Sushi Bar", 1);   
-        _mapOptionButton.AddItem("Burger Diner", 2); 
+        _mapOptionButton.AddItem("TEST (5s)", 0);
+        _mapOptionButton.AddItem("Salad Bar", 1);
+        _mapOptionButton.AddItem("Sushi Bar", 2);
+        _mapOptionButton.AddItem("Burger Diner", 3);
 
         // Wire Signals
         _readyButton.Pressed += OnReadyPressed;
@@ -73,9 +73,10 @@ public partial class LobbyScene : Control
 
         string levelId = index switch
         {
-            0 => "map1",
-            1 => "map2",
-            2 => "map3",
+            0 => "map0",
+            1 => "map1",
+            2 => "map2",
+            3 => "map3",
             _ => "map1"
         };
 
@@ -103,12 +104,13 @@ public partial class LobbyScene : Control
         
         int mapIndex = lobbyState.LevelId switch
         {
-            "map1" => 0,
-            "map2" => 1,
-            "map3" => 2,
-            _ => 0
+            "map0" => 0,
+            "map1" => 1,
+            "map2" => 2,
+            "map3" => 3,
+            _ => 1
         };
-        
+                
         if (_mapOptionButton.Selected != mapIndex)
         {
             _mapOptionButton.Select(mapIndex);
