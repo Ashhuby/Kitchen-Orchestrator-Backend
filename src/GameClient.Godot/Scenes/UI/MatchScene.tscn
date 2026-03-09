@@ -24,6 +24,7 @@ text = "status"
 layout_mode = 2
 text = "Timer
 "
+<<<<<<< HEAD
 
 [node name="ScoreLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
@@ -31,3 +32,5 @@ text = "Score"
 
 [node name="OrderListContainer" type="VBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
+=======
+>>>>>>> 7aec0bf44a31b01348d18fb32e88fa7cceea62ab

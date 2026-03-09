@@ -1,6 +1,7 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.GameServer.Services;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
 using KitchenOrchestrator.Shared.GameLogic.Recipes;
 using Microsoft.AspNetCore.Http;
@@ -28,6 +29,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             _logger = logger;
         }
 
+
         public override async Task OnConnectedAsync()
         {
             var httpContext = Context.GetHttpContext();
@@ -41,6 +43,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             }
 
             var claims = _jwtValidation.Validate(token);
+
 
             if (claims == null)
             {
@@ -56,6 +59,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             await base.OnConnectedAsync();
         }
 
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             _logger.LogInformation("Connection {ConnectionId} disconnected.", Context.ConnectionId);
@@ -70,6 +74,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var displayName = (string)Context.Items["DisplayName"]!;
 
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
+
 
             var session = _sessionService.GetOrCreateSession(levelId);
 
@@ -127,6 +132,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
             bool shouldStart = false;
 
+
             lock (session.Players)
             {
                 bool allReady = session.Players.All(p => p.IsReady);
@@ -136,6 +142,9 @@ namespace KitchenOrchestrator.GameServer.Hubs
                     shouldStart = true;
                 }
             }
+
+            // Always broadcast state so players see readiness updates
+            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
 
             // Always broadcast state so players see readiness updates
             await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));

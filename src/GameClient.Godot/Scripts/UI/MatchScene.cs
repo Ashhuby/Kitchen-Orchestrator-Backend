@@ -1,4 +1,5 @@
 using Godot;
+<<<<<<< HEAD
 using KitchenOrchestrator.GameClient.Godot;
 using KitchenOrchestrator.Shared.Contracts.DTOs;	
 using System.Linq;
@@ -90,3 +91,21 @@ public partial class MatchScene : Control
         CleanupSubscriptions();
     }
 }
+=======
+
+public partial class MatchScene : Control
+{
+	private Label _statusLabel = null!;
+	private Label _timerLabel = null!;
+
+	public override void _Ready()
+	{
+		_statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
+		_timerLabel = GetNode<Label>("VBoxContainer/TimerLabel");
+
+		// Initial UI State
+		_statusLabel.Text = "Match in progress...";
+		_timerLabel.Text = "";
+	}
+}
+>>>>>>> 7aec0bf44a31b01348d18fb32e88fa7cceea62ab

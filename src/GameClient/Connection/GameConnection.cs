@@ -93,6 +93,14 @@ namespace KitchenOrchestrator.GameClient.Connection
             await _connection.InvokeAsync("ChangeMap", sessionId, levelId);
         }
 
+        public async Task ChangeMapAsync(Guid sessionId, string levelId)
+        {
+            if (_connection == null || _connection.State != HubConnectionState.Connected)
+                throw new InvalidOperationException("Not connected to server.");
+
+            await _connection.InvokeAsync("ChangeMap", sessionId, levelId);
+        }
+
         public async Task SendReadyAsync(Guid sessionId)
         {
             if (_connection == null || _connection.State != HubConnectionState.Connected)
