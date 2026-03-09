@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://bxge3dg0u21mb"]
 
-[ext_resource type="Script" path="res://Scripts/LobbyScene.cs" id="1_mm7oa"]
+[ext_resource type="Script" path="res://Scripts/UI/LobbyScene.cs" id="1_oect7"]
 
 [node name="LobbyScene" type="Control"]
 layout_mode = 3
@@ -15,7 +15,7 @@ offset_right = 20.0
 offset_bottom = 20.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_mm7oa")
+script = ExtResource("1_oect7")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -33,19 +33,19 @@ grow_vertical = 2
 
 [node name="StatusLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "Not logged in"
+text = "STATUS"
 horizontal_alignment = 1
 
-[node name="DisplayNameInput" type="LineEdit" parent="VBoxContainer"]
+[node name="PlayerListContainer" type="VBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
-placeholder_text = "Enter display name"
-alignment = 1
 
-[node name="LoginButton" type="Button" parent="VBoxContainer"]
+[node name="MapOptionButton" type="OptionButton" parent="VBoxContainer"]
 layout_mode = 2
-text = "Login with Steam"
 
-[node name="ConnectButton" type="Button" parent="VBoxContainer"]
+[node name="ReadyButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
-disabled = true
-text = "Join Match"
+text = "Ready Up"
+
+[node name="LeaveButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Leave"

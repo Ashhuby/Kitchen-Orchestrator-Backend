@@ -21,6 +21,7 @@ builder.Services.AddSingleton<IMatchSessionService, MatchSessionService>();
 
 // Registered with HttpClient to manage the outgoing pipeline and connection pooling
 builder.Services.AddHttpClient<IMatchResultSubmissionService, MatchResultSubmissionService>();
+builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>();
 
 // The Heartbeat (Background Service)
 builder.Services.AddHostedService<GameLoopService>();
