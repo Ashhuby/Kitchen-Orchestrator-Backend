@@ -1,8 +1,7 @@
 using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 using Microsoft.AspNetCore.SignalR.Client;
-using System;
-using System.Threading.Tasks;
 
 namespace KitchenOrchestrator.GameClient.Connection
 {
@@ -12,8 +11,9 @@ namespace KitchenOrchestrator.GameClient.Connection
         private readonly ClientState _state;
         private HubConnection? _connection;
 
-        // Added the event field to allow UI components to subscribe
+        // C# events to allow UI components to subscribe
         public event Action<Guid>? OnMatchStarted;
+        public event Action<LobbyStateDto>? OnLobbyStateUpdated;
 
         public GameConnection(GameClientOptions options, ClientState state)
         {
@@ -31,9 +31,6 @@ namespace KitchenOrchestrator.GameClient.Connection
 
             try
             {
-                // WithAutomaticReconnect() removed - it was triggering OnDisconnectedAsync
-                // which deleted the empty lobby before Player 2 could join.
-                // Will be re-added with proper session rejoin logic later.
                 _connection = new HubConnectionBuilder()
                     .WithUrl($"{_options.GameServerHubUrl}?access_token={_state.Jwt}")
                     .Build();
@@ -45,11 +42,15 @@ namespace KitchenOrchestrator.GameClient.Connection
                     Console.WriteLine($"Joined match session: {sessionId}");
                 });
 
-                // Updated handler to invoke the local C# event for the UI
                 _connection.On<Guid>("MatchStarted", (sessionId) =>
                 {
                     Console.WriteLine($"Match started: {sessionId}");
                     OnMatchStarted?.Invoke(sessionId);
+                });
+
+                _connection.On<LobbyStateDto>("LobbyStateUpdated", (lobbyState) =>
+                {
+                    OnLobbyStateUpdated?.Invoke(lobbyState);
                 });
 
                 await _connection.StartAsync();
@@ -69,6 +70,14 @@ namespace KitchenOrchestrator.GameClient.Connection
                 throw new InvalidOperationException("Cannot join match: Not connected to server.");
 
             await _connection.InvokeAsync("JoinMatch", levelId);
+        }
+
+        public async Task ChangeMapAsync(Guid sessionId, string levelId)
+        {
+            if (_connection == null || _connection.State != HubConnectionState.Connected)
+                throw new InvalidOperationException("Not connected to server.");
+
+            await _connection.InvokeAsync("ChangeMap", sessionId, levelId);
         }
 
         public async Task SendReadyAsync(Guid sessionId)
