@@ -1,7 +1,7 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.Shared.Contracts.Enums;
 using KitchenOrchestrator.Shared.GameLogic.Levels;
-using Microsoft.Extensions.Logging; 
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
 namespace KitchenOrchestrator.GameServer.Services
@@ -27,25 +27,36 @@ namespace KitchenOrchestrator.GameServer.Services
 
         public MatchSession GetOrCreateSession(string levelId)
         {
-            // Find existing Lobby
-            var existingLobby = _sessions.Values.FirstOrDefault(s => 
-                s.LevelId == levelId && s.State == MatchState.Lobby);
+            _logger.LogInformation(
+                "GetOrCreateSession called for {LevelId}. Total sessions: {Count}, Lobby sessions: {LobbyCount}",
+                levelId,
+                _sessions.Count,
+                _sessions.Values.Count(s => s.LevelId == levelId && s.State == MatchState.Lobby));
 
-            if (existingLobby != null) return existingLobby;
+            foreach (var s in _sessions.Values)
+            {
+                _logger.LogInformation(
+                    "Existing session {Id} LevelId={Level} State={State} Players={Count}",
+                    s.SessionId, s.LevelId, s.State, s.Players.Count);
+            }
 
-            // Create new if registry allows
+            var existingLobby = _sessions.Values.FirstOrDefault(s =>
+                s.LevelId.Equals(levelId, StringComparison.OrdinalIgnoreCase) && 
+                s.State == MatchState.Lobby);
+
+            if (existingLobby != null)
+                return existingLobby;
+
             var levelDef = LevelRegistry.GetById(levelId);
             if (levelDef == null)
-            {
                 throw new ArgumentException($"Level with ID {levelId} does not exist.");
-            }
 
             var newSession = new MatchSession(levelDef);
             _sessions.TryAdd(newSession.SessionId, newSession);
-            
-            _logger.LogInformation("Created new MatchSession {SessionId} for Level {LevelId}", 
+
+            _logger.LogInformation("Created new MatchSession {SessionId} for Level {LevelId}",
                 newSession.SessionId, levelId);
-                
+
             return newSession;
         }
 
@@ -56,7 +67,6 @@ namespace KitchenOrchestrator.GameServer.Services
 
         public IReadOnlyList<MatchSession> GetActiveSessions()
         {
-            // ToList() creates a snapshot for the caller
             return _sessions.Values
                 .Where(s => s.State == MatchState.Active)
                 .ToList()
@@ -79,7 +89,6 @@ namespace KitchenOrchestrator.GameServer.Services
 
         public void RemovePlayer(string connectionId)
         {
-            // Safe to iterate and TryRemove thanks to ConcurrentDictionarys implementation yayyy
             foreach (var session in _sessions.Values)
             {
                 lock (session.Players)
@@ -88,15 +97,12 @@ namespace KitchenOrchestrator.GameServer.Services
                     if (player != null)
                     {
                         session.Players.Remove(player);
-                        _logger.LogInformation("Player {PlayerId} removed from Session {SessionId}", 
+                        _logger.LogInformation("Player {PlayerId} removed from Session {SessionId}",
                             player.PlayerId, session.SessionId);
-                        
-                        // Self-cleaning: If the lobby is empty, burn the room down.
-                        if (session.Players.Count == 0 && session.State == MatchState.Lobby)
-                        {
-                            _sessions.TryRemove(session.SessionId, out _);
-                            _logger.LogDebug("Cleanup: Removed empty lobby {SessionId}", session.SessionId);
-                        }
+
+                        // NOTE: Lobby cleanup removed - was deleting sessions too aggressively
+                        // during reconnect flows. Will re-add with proper grace period later.
+                        break;
                     }
                 }
             }

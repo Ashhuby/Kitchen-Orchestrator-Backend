@@ -19,6 +19,7 @@ src/GameClient/.import/
 src/GameClient/export/
 src/GameClient/.mono/
 src/GameClient/mono_crash.*.json
+src/GameClient.Godot/.godot/
 
 # ── Docker / Secrets ───────────────────────────────────────
 .env

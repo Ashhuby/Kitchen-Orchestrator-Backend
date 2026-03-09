@@ -6,7 +6,8 @@ namespace KitchenOrchestrator.GameServer.Models
     public class MatchSession
     {
         public Guid SessionId { get; }
-        public string LevelId { get; }
+        public string LevelId { get; private set; }  // host can change in lobby
+        public string HostConnectionId { get; private set; } = string.Empty;
         public MatchState State { get; set; }
         public DateTime StartedAtUtc { get; private set; }
         public float TimeRemainingSeconds { get; set; }
@@ -32,6 +33,18 @@ namespace KitchenOrchestrator.GameServer.Models
         {
             State = MatchState.Active;
             StartedAtUtc = DateTime.UtcNow;
+        }
+
+        public void SetHost(string connectionId)
+        {
+            if (string.IsNullOrEmpty(HostConnectionId))
+                HostConnectionId = connectionId;
+        }
+
+        public void SetLevel(string levelId, string requestingConnectionId)
+        {
+            if (requestingConnectionId == HostConnectionId && State == MatchState.Lobby)
+                LevelId = levelId;
         }
     }
 }
