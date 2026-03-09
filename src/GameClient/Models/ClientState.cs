@@ -9,6 +9,7 @@ namespace KitchenOrchestrator.GameClient.Models
         public PlayerProfileDto? Profile { get; set; }
         public bool IsConnectedToMatch { get; set; }
         public Guid? CurrentSessionId { get; set; }
+        public Guid? PlayerId => Profile?.Id;
         public bool IsTokenValid => Jwt != null && TokenExpiresUtc.HasValue && TokenExpiresUtc.Value > DateTime.UtcNow;
     }
 }
