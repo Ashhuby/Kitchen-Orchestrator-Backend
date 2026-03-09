@@ -19,6 +19,11 @@ config/icon="res://icon.svg"
 
 Bootstrap="*res://Autoloads/Bootstrap.cs"
 
+[display]
+
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
 [dotnet]
 
 project/assembly_name="KitchenOrchestrator.GameClient.Godot"

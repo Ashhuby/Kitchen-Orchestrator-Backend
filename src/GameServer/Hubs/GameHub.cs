@@ -1,5 +1,6 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.GameServer.Services;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -67,10 +68,29 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
 
             var session = _sessionService.GetOrCreateSession(levelId);
+            
+            // Assign the host if one hasn't been set yet
+            session.SetHost(Context.ConnectionId);
+            
             _sessionService.AddPlayerToSession(session.SessionId, player);
 
             await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId.ToString());
             await Clients.Caller.SendAsync("JoinedMatch", session.SessionId);
+
+            // Broadcast the current lobby state to everyone in the session
+            await Clients.Group(session.SessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+        }
+
+        public async Task ChangeMap(Guid sessionId, string levelId)
+        {
+            var session = _sessionService.GetSession(sessionId);
+            if (session == null) return;
+
+            // session.SetLevel handles the host validation logic
+            session.SetLevel(levelId, Context.ConnectionId);
+
+            // Broadcast updated state to reflect the new map
+            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
         }
 
         public async Task PlayerReady(Guid sessionId)
@@ -95,11 +115,26 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 }
             }
 
+            // Always broadcast state so players see readiness updates
+            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+
             if (shouldStart)
             {
                 _logger.LogInformation("Session {SessionId} conditions met. Starting match.", sessionId);
                 await Clients.Group(sessionId.ToString()).SendAsync("MatchStarted", sessionId);
             }
+        }
+
+        private LobbyStateDto BuildLobbyState(MatchSession session)
+        {
+            var players = session.Players.Select(p => new LobbyPlayerDto(
+                p.PlayerId,
+                p.DisplayName,
+                p.IsReady,
+                p.ConnectionId == session.HostConnectionId
+            )).ToList().AsReadOnly();
+
+            return new LobbyStateDto(session.SessionId, session.LevelId, players);
         }
     }
 }
