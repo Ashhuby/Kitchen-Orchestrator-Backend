@@ -1,111 +1,156 @@
 using Godot;
 using System;
-using System.Threading.Tasks;
+using System.Linq;
 using KitchenOrchestrator.GameClient.Godot;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 
 public partial class LobbyScene : Control
 {
     private Label _statusLabel = null!;
-    private LineEdit _displayNameInput = null!;
-    private Button _loginButton = null!;
-    private Button _connectButton = null!;
+    private VBoxContainer _playerListContainer = null!;
+    private OptionButton _mapOptionButton = null!;
+    private Button _readyButton = null!;
+    private Button _leaveButton = null!;
+
+    private bool _isHost = false;
+    private LobbyStateDto? _latestLobbyState; // Field to hold state for thread-safe UI updates
 
     public override void _Ready()
     {
+        // Get Node References
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
-        _displayNameInput = GetNode<LineEdit>("VBoxContainer/DisplayNameInput");
-        _loginButton = GetNode<Button>("VBoxContainer/LoginButton");
-        _connectButton = GetNode<Button>("VBoxContainer/ConnectButton");
+        _playerListContainer = GetNode<VBoxContainer>("VBoxContainer/PlayerListContainer");
+        _mapOptionButton = GetNode<OptionButton>("VBoxContainer/MapOptionButton");
+        _readyButton = GetNode<Button>("VBoxContainer/ReadyButton");
+        _leaveButton = GetNode<Button>("VBoxContainer/LeaveButton");
 
-        _connectButton.Disabled = true;
-        _statusLabel.Text = "Ready to Login";
+        // Initial State
+        _readyButton.Disabled = true;
+        _mapOptionButton.Disabled = true;
+        _statusLabel.Text = "Connected to Server";
 
-        _loginButton.Pressed += OnLoginPressed;
-        _connectButton.Pressed += OnConnectPressed;
-    }
+        // Setup Map Options
+        _mapOptionButton.Clear();
+        _mapOptionButton.AddItem("Salad Bar", 0);   
+        _mapOptionButton.AddItem("Sushi Bar", 1);   
+        _mapOptionButton.AddItem("Burger Diner", 2); 
 
-    private async void OnLoginPressed()
-    {
-        string displayName = _displayNameInput.Text;
+        // Wire Signals
+        _readyButton.Pressed += OnReadyPressed;
+        _leaveButton.Pressed += OnLeavePressed;
+        _mapOptionButton.ItemSelected += OnMapChanged;
+
+        // Subscribe to SignalR events
+        Bootstrap.Connection.OnLobbyStateUpdated += OnLobbyStateUpdated;
+        Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
         
-        if (string.IsNullOrWhiteSpace(displayName))
+        if (Bootstrap.State.CurrentSessionId.HasValue)
         {
-            _statusLabel.Text = "Please enter a display name.";
-            return;
-        }
-
-        _statusLabel.Text = "Logging in (Dev Mode)...";
-        _loginButton.Disabled = true;
-
-        bool success = await Bootstrap.Auth.DevLoginAsync(displayName);
-
-        if (success)
-        {
-            _statusLabel.Text = $"Logged in as {displayName} (DEV)";
-            _connectButton.Disabled = false;
-        }
-        else
-        {
-            _statusLabel.Text = "Login failed";
-            _loginButton.Disabled = false;
+            _readyButton.Disabled = false;
         }
     }
 
-    private async void OnConnectPressed()
+    private async void OnReadyPressed()
     {
-        _statusLabel.Text = "Connecting to match...";
-        _connectButton.Disabled = true;
-
-        bool connected = await Bootstrap.Connection.ConnectAsync();
-
-        if (connected)
+        if (Bootstrap.State.CurrentSessionId.HasValue)
         {
-            // Subscribe to the match start event
-            Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
-
-            try 
-            {
-                await Bootstrap.Connection.JoinMatchAsync("map1");
-
-                var timeout = DateTime.UtcNow.AddSeconds(5);
-                while (!Bootstrap.State.CurrentSessionId.HasValue && DateTime.UtcNow < timeout)
-                {
-                    await Task.Delay(100);
-                }
-
-                if (!Bootstrap.State.CurrentSessionId.HasValue)
-                {
-                    _statusLabel.Text = "Join Match timed out";
-                    _connectButton.Disabled = false;
-                    return;
-                }
-
-                await Bootstrap.Connection.SendReadyAsync(Bootstrap.State.CurrentSessionId.Value);
-                _statusLabel.Text = "Waiting for match...";
-            }
-            catch (Exception ex)
-            {
-                _statusLabel.Text = "Join Match failed";
-                GD.PrintErr($"Join Match Error: {ex.Message}");
-                _connectButton.Disabled = false;
-            }
-        }
-        else
-        {
-            _statusLabel.Text = "Connection failed";
-            _connectButton.Disabled = false;
+            await Bootstrap.Connection.SendReadyAsync(Bootstrap.State.CurrentSessionId.Value);
+            _readyButton.Disabled = true;
+            _statusLabel.Text = "Ready! Waiting for others...";
         }
     }
 
-    // Handler invoked from GameConnection's SignalR thread
+    private async void OnLeavePressed()
+    {
+        CleanupSubscriptions();
+        await Bootstrap.Connection.DisconnectAsync();
+        GetTree().ChangeSceneToFile("res://Scenes/UI/MainMenuScene.tscn");
+    }
+
+    private async void OnMapChanged(long index)
+    {
+        if (!_isHost || !Bootstrap.State.CurrentSessionId.HasValue) return;
+
+        string levelId = index switch
+        {
+            0 => "map1",
+            1 => "map2",
+            2 => "map3",
+            _ => "map1"
+        };
+
+        await Bootstrap.Connection.ChangeMapAsync(Bootstrap.State.CurrentSessionId.Value, levelId);
+    }
+
+    private void OnLobbyStateUpdated(LobbyStateDto lobbyState)
+    {
+        // Store the state and defer the UI update to the main thread
+        _latestLobbyState = lobbyState;
+        CallDeferred(nameof(UpdateUIFromLobbyState));
+    }
+
+    private void UpdateUIFromLobbyState()
+    {
+        if (_latestLobbyState == null) return;
+        var lobbyState = _latestLobbyState;
+
+        // 1. Determine Host Status (Uses the PlayerId convenience property in ClientState)
+        var me = lobbyState.Players.FirstOrDefault(p => p.PlayerId == Bootstrap.State.PlayerId);
+        _isHost = me?.IsHost ?? false;
+
+        // 2. Update Map Selector
+        _mapOptionButton.Disabled = !_isHost;
+        
+        int mapIndex = lobbyState.LevelId switch
+        {
+            "map1" => 0,
+            "map2" => 1,
+            "map3" => 2,
+            _ => 0
+        };
+        
+        if (_mapOptionButton.Selected != mapIndex)
+        {
+            _mapOptionButton.Select(mapIndex);
+        }
+
+        // 3. Rebuild Player List UI
+        foreach (Node child in _playerListContainer.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        foreach (var player in lobbyState.Players)
+        {
+            var label = new Label();
+            string hostTag = player.IsHost ? " [HOST]" : "";
+            string readyTag = player.IsReady ? " (READY)" : " (Joining...)";
+            label.Text = $"{player.DisplayName}{hostTag}{readyTag}";
+            _playerListContainer.AddChild(label);
+        }
+
+        _statusLabel.Text = _isHost ? "You are the Host" : "Waiting for Host...";
+    }
+
     private void OnMatchStarted(Guid sessionId)
     {
-        // Safe cross-thread UI update via Godot's main thread
-        CallDeferred(nameof(UpdateStatusForMatchStart));
+        CallDeferred(nameof(TransitionToMatch));
     }
 
-    private void UpdateStatusForMatchStart()
+    private void TransitionToMatch()
     {
-        _statusLabel.Text = "Match Started!";
+        CleanupSubscriptions();
+        GetTree().ChangeSceneToFile("res://Scenes/UI/MatchScene.tscn");
+    }
+
+    private void CleanupSubscriptions()
+    {
+        Bootstrap.Connection.OnLobbyStateUpdated -= OnLobbyStateUpdated;
+        Bootstrap.Connection.OnMatchStarted -= OnMatchStarted;
+    }
+
+    public override void _ExitTree()
+    {
+        CleanupSubscriptions();
     }
 }

@@ -33,19 +33,19 @@ grow_vertical = 2
 
 [node name="StatusLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "Not logged in"
+text = "STATUS"
 horizontal_alignment = 1
 
-[node name="DisplayNameInput" type="LineEdit" parent="VBoxContainer"]
+[node name="PlayerListContainer" type="VBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
-placeholder_text = "Enter display name"
-alignment = 1
 
-[node name="LoginButton" type="Button" parent="VBoxContainer"]
+[node name="MapOptionButton" type="OptionButton" parent="VBoxContainer"]
 layout_mode = 2
-text = "Login with Steam"
 
-[node name="ConnectButton" type="Button" parent="VBoxContainer"]
+[node name="ReadyButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
-disabled = true
-text = "Join Match"
+text = "Ready Up"
+
+[node name="LeaveButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Leave"

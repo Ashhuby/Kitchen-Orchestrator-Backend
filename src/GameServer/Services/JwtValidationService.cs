@@ -25,16 +25,18 @@ namespace KitchenOrchestrator.GameServer.Services
         {
             if (string.IsNullOrEmpty(token)) return null;
 
-            // Dev bypass - only active if ASPNETCORE_ENVIRONMENT is 'Development'
-            if (_environment.IsDevelopment() && token == "dev-mock-jwt-token")
+            // Dev bypass - Parse the client-generated GUID from the token string bleh
+            if (_environment.IsDevelopment() && token.StartsWith("dev-mock-jwt-token:"))
             {
-                // Generate a unique ID for every call so simultaneous 
-                // test clients aren't treated as the same player
-                return new PlayerTokenClaims(
-                    Guid.NewGuid(), 
-                    "dev-steam-id",
-                    "DevPlayer"
-                );
+                var parts = token.Split(':');
+                if (parts.Length > 1 && Guid.TryParse(parts[1], out var playerId))
+                {
+                    return new PlayerTokenClaims(
+                        playerId, 
+                        "dev-steam-id",
+                        "DevPlayer"
+                    );
+                }
             }
 
             // Standard cryptographic check via Shared.Security

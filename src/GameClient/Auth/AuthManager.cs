@@ -56,12 +56,13 @@ namespace KitchenOrchestrator.GameClient.Auth
 
         public async Task<bool> DevLoginAsync(string displayName)
         {
-            // Mock auth bypass for development heheheh fake data
-            _state.Jwt = "dev-mock-jwt-token";
+            var playerId = Guid.NewGuid();
+            
+            _state.Jwt = $"dev-mock-jwt-token:{playerId}";
             _state.TokenExpiresUtc = DateTime.UtcNow.AddHours(24);
             
             _state.Profile = new PlayerProfileDto(
-                Guid.NewGuid(),    // Id
+                playerId,          // Consistent Id
                 displayName,       // DisplayName
                 0,                 // MatchesPlayed
                 0,                 // MatchesWon
