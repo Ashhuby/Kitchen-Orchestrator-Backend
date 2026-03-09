@@ -1,6 +1,8 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.GameServer.Services;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -21,13 +23,12 @@ namespace KitchenOrchestrator.GameServer.Hubs
             _sessionService = sessionService;
             _logger = logger;
         }
+
         public override async Task OnConnectedAsync()
         {
             var httpContext = Context.GetHttpContext();
-            // Use the null-coalescing operator or a direct check
             string? token = httpContext?.Request.Query["access_token"];
 
-            // heck if token is null or empty first
             if (string.IsNullOrEmpty(token))
             {
                 _logger.LogWarning("Connection attempt without a token. Aborting {ConnectionId}", Context.ConnectionId);
@@ -35,9 +36,8 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            // Now 'token' is guaranteed not to be null for the Validate method
             var claims = _jwtValidation.Validate(token);
-            
+
             if (claims == null)
             {
                 _logger.LogWarning("Invalid JWT provided for {ConnectionId}", Context.ConnectionId);
@@ -45,14 +45,13 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            // Store claims...
             Context.Items["PlayerId"] = claims.PlayerId;
             Context.Items["SteamId"] = claims.SteamId;
             Context.Items["DisplayName"] = claims.DisplayName;
 
             await base.OnConnectedAsync();
         }
-        
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             _logger.LogInformation("Connection {ConnectionId} disconnected.", Context.ConnectionId);
@@ -67,12 +66,31 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var displayName = (string)Context.Items["DisplayName"]!;
 
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
-            
+
             var session = _sessionService.GetOrCreateSession(levelId);
+            
+            // Assign the host if one hasn't been set yet
+            session.SetHost(Context.ConnectionId);
+            
             _sessionService.AddPlayerToSession(session.SessionId, player);
 
             await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId.ToString());
             await Clients.Caller.SendAsync("JoinedMatch", session.SessionId);
+
+            // Broadcast the current lobby state to everyone in the session
+            await Clients.Group(session.SessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+        }
+
+        public async Task ChangeMap(Guid sessionId, string levelId)
+        {
+            var session = _sessionService.GetSession(sessionId);
+            if (session == null) return;
+
+            // session.SetLevel handles the host validation logic
+            session.SetLevel(levelId, Context.ConnectionId);
+
+            // Broadcast updated state to reflect the new map
+            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
         }
 
         public async Task PlayerReady(Guid sessionId)
@@ -86,8 +104,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             player.IsReady = true;
 
             bool shouldStart = false;
-            
-            // Fixed: Lock logic only wraps synchronous state changes to prevent async deadlocks
+
             lock (session.Players)
             {
                 bool allReady = session.Players.All(p => p.IsReady);
@@ -98,11 +115,26 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 }
             }
 
+            // Always broadcast state so players see readiness updates
+            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+
             if (shouldStart)
             {
                 _logger.LogInformation("Session {SessionId} conditions met. Starting match.", sessionId);
                 await Clients.Group(sessionId.ToString()).SendAsync("MatchStarted", sessionId);
             }
+        }
+
+        private LobbyStateDto BuildLobbyState(MatchSession session)
+        {
+            var players = session.Players.Select(p => new LobbyPlayerDto(
+                p.PlayerId,
+                p.DisplayName,
+                p.IsReady,
+                p.ConnectionId == session.HostConnectionId
+            )).ToList().AsReadOnly();
+
+            return new LobbyStateDto(session.SessionId, session.LevelId, players);
         }
     }
 }

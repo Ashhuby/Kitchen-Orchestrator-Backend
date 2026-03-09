@@ -8,4 +8,8 @@ namespace KitchenOrchestrator.Shared.Contracts.DTOs
     public record ParticipantResult(Guid PlayerProfileId, int IndividualScore, int OrdersDelivered); 
     public record  MatchHistorySummaryDto(Guid MatchSessionId, string LevelId, DateTime MatchBeginUtc, DateTime MatchEndUtc, int FinalScore, int TargetScore, bool Won, int FailedOrders, int CompletedOrders, int PerfectOrders, int IndividualScore);
     public record ApiErrorResponse(string Error, string? Detail = null); 
+
+    // Lobby
+    public record LobbyPlayerDto(Guid PlayerId, string DisplayName, bool IsReady, bool IsHost);
+    public record LobbyStateDto(Guid SessionId, string LevelId, IReadOnlyList<LobbyPlayerDto> Players);
 }

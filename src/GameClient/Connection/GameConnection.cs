@@ -1,5 +1,6 @@
 using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace KitchenOrchestrator.GameClient.Connection
@@ -10,6 +11,10 @@ namespace KitchenOrchestrator.GameClient.Connection
         private readonly ClientState _state;
         private HubConnection? _connection;
 
+        // C# events to allow UI components to subscribe
+        public event Action<Guid>? OnMatchStarted;
+        public event Action<LobbyStateDto>? OnLobbyStateUpdated;
+
         public GameConnection(GameClientOptions options, ClientState state)
         {
             _options = options;
@@ -18,7 +23,6 @@ namespace KitchenOrchestrator.GameClient.Connection
 
         public async Task<bool> ConnectAsync()
         {
-            // Verify we have a valid session before even trying to connect
             if (!_state.IsTokenValid)
             {
                 Console.WriteLine("ConnectAsync aborted: JWT is missing or expired.");
@@ -27,13 +31,10 @@ namespace KitchenOrchestrator.GameClient.Connection
 
             try
             {
-                // SignalR uses the query string for the token because WebSockets                
                 _connection = new HubConnectionBuilder()
                     .WithUrl($"{_options.GameServerHubUrl}?access_token={_state.Jwt}")
-                    .WithAutomaticReconnect()
                     .Build();
 
-                // Register Event Handlers
                 _connection.On<Guid>("JoinedMatch", (sessionId) =>
                 {
                     _state.CurrentSessionId = sessionId;
@@ -44,11 +45,15 @@ namespace KitchenOrchestrator.GameClient.Connection
                 _connection.On<Guid>("MatchStarted", (sessionId) =>
                 {
                     Console.WriteLine($"Match started: {sessionId}");
+                    OnMatchStarted?.Invoke(sessionId);
                 });
 
-                // Open the WebSocket line hooray
+                _connection.On<LobbyStateDto>("LobbyStateUpdated", (lobbyState) =>
+                {
+                    OnLobbyStateUpdated?.Invoke(lobbyState);
+                });
+
                 await _connection.StartAsync();
-                
                 return true;
             }
             catch (Exception ex)
@@ -65,6 +70,14 @@ namespace KitchenOrchestrator.GameClient.Connection
                 throw new InvalidOperationException("Cannot join match: Not connected to server.");
 
             await _connection.InvokeAsync("JoinMatch", levelId);
+        }
+
+        public async Task ChangeMapAsync(Guid sessionId, string levelId)
+        {
+            if (_connection == null || _connection.State != HubConnectionState.Connected)
+                throw new InvalidOperationException("Not connected to server.");
+
+            await _connection.InvokeAsync("ChangeMap", sessionId, levelId);
         }
 
         public async Task SendReadyAsync(Guid sessionId)
