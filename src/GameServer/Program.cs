@@ -18,6 +18,7 @@ builder.Services.AddSingleton<IJwtValidationService, JwtValidationService>();
 
 // Game Server Logic
 builder.Services.AddSingleton<IMatchSessionService, MatchSessionService>();
+builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>();
 
 // Registered with HttpClient to manage the outgoing pipeline and connection pooling
 builder.Services.AddHttpClient<IMatchResultSubmissionService, MatchResultSubmissionService>();

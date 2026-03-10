@@ -6,10 +6,16 @@ namespace KitchenOrchestrator.Shared.Contracts.DTOs
     public record PlayerProfileDto(Guid Id, string DisplayName, int MatchesPlayed, int MatchesWon, int TotalScore, int PerfectOrders);  
     public record MatchResultSubmission(Guid MatchSessionId, DateTime MatchBeginUtc, DateTime MatchEndUtc, string LevelId, int FinalScore, int TargetScore, string MatchState, int FailedOrders, int CompletedOrders, int PerfectOrders, IReadOnlyList<ParticipantResult> Participants);
     public record ParticipantResult(Guid PlayerProfileId, int IndividualScore, int OrdersDelivered); 
-    public record  MatchHistorySummaryDto(Guid MatchSessionId, string LevelId, DateTime MatchBeginUtc, DateTime MatchEndUtc, int FinalScore, int TargetScore, bool Won, int FailedOrders, int CompletedOrders, int PerfectOrders, int IndividualScore);
+    public record MatchHistorySummaryDto(Guid MatchSessionId, string LevelId, DateTime MatchBeginUtc, DateTime MatchEndUtc, int FinalScore, int TargetScore, bool Won, int FailedOrders, int CompletedOrders, int PerfectOrders, int IndividualScore);
     public record ApiErrorResponse(string Error, string? Detail = null); 
 
     // Lobby
     public record LobbyPlayerDto(Guid PlayerId, string DisplayName, bool IsReady, bool IsHost);
     public record LobbyStateDto(Guid SessionId, string LevelId, IReadOnlyList<LobbyPlayerDto> Players);
+
+    // Match
+    public record ActiveOrderDto(Guid OrderId, string RecipeName, IReadOnlyList<string> RequiredIngredients, float TimeRemaining, float TotalDuration);
+    public record DeliveryResult(bool Success, int ScoreAwarded, bool IsPerfect, string? FailureReason);
+    public record MatchPlayerDto(Guid PlayerId, string DisplayName, int Score, int OrdersDelivered);
+    public record MatchStateDto(Guid SessionId, string State, float TimeRemaining, int TotalScore, IReadOnlyList<ActiveOrderDto> ActiveOrders, IReadOnlyList<MatchPlayerDto> Players);
 }

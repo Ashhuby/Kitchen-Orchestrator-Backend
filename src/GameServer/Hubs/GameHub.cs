@@ -2,6 +2,7 @@ using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.GameServer.Services;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
+using KitchenOrchestrator.Shared.GameLogic.Recipes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -12,15 +13,18 @@ namespace KitchenOrchestrator.GameServer.Hubs
     {
         private readonly IJwtValidationService _jwtValidation;
         private readonly IMatchSessionService _sessionService;
+        private readonly IMatchSimulationService _matchSimulation;
         private readonly ILogger<GameHub> _logger;
 
         public GameHub(
             IJwtValidationService jwtValidation,
             IMatchSessionService sessionService,
+            IMatchSimulationService matchSimulation,
             ILogger<GameHub> logger)
         {
             _jwtValidation = jwtValidation;
             _sessionService = sessionService;
+            _matchSimulation = matchSimulation;
             _logger = logger;
         }
 
@@ -68,16 +72,11 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
 
             var session = _sessionService.GetOrCreateSession(levelId);
-            
-            // Assign the host if one hasn't been set yet
             session.SetHost(Context.ConnectionId);
-            
             _sessionService.AddPlayerToSession(session.SessionId, player);
 
             await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId.ToString());
             await Clients.Caller.SendAsync("JoinedMatch", session.SessionId);
-
-            // Broadcast the current lobby state to everyone in the session
             await Clients.Group(session.SessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
         }
 
@@ -86,10 +85,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var session = _sessionService.GetSession(sessionId);
             if (session == null) return;
 
-            // session.SetLevel handles the host validation logic
             session.SetLevel(levelId, Context.ConnectionId);
-
-            // Broadcast updated state to reflect the new map
             await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
         }
 
@@ -115,7 +111,6 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 }
             }
 
-            // Always broadcast state so players see readiness updates
             await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
 
             if (shouldStart)
@@ -123,6 +118,13 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 _logger.LogInformation("Session {SessionId} conditions met. Starting match.", sessionId);
                 await Clients.Group(sessionId.ToString()).SendAsync("MatchStarted", sessionId);
             }
+        }
+
+        public async Task DeliverDish(Guid sessionId, List<Ingredient> ingredients)
+        {
+            var playerId = (Guid)Context.Items["PlayerId"]!;
+            var result = _matchSimulation.DeliverDish(sessionId, playerId, ingredients);
+            await Clients.Caller.SendAsync("DeliveryResult", result);
         }
 
         private LobbyStateDto BuildLobbyState(MatchSession session)

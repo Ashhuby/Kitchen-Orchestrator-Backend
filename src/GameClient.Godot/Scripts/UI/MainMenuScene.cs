@@ -40,7 +40,7 @@ public partial class MainMenuScene : Control
             }
 
             // Request to join a match
-            await Bootstrap.Connection.JoinMatchAsync("map1");
+            await Bootstrap.Connection.JoinMatchAsync("map0");
 
             // Wait for the server to assign a SessionId (populated via JoinedMatch event)
             var timeout = DateTime.UtcNow.AddSeconds(5);
