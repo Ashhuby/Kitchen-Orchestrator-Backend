@@ -1,6 +1,7 @@
 using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
+using KitchenOrchestrator.Shared.GameLogic.Recipes;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace KitchenOrchestrator.GameClient.Connection
@@ -11,9 +12,10 @@ namespace KitchenOrchestrator.GameClient.Connection
         private readonly ClientState _state;
         private HubConnection? _connection;
 
-        // C# events to allow UI components to subscribe
         public event Action<Guid>? OnMatchStarted;
         public event Action<LobbyStateDto>? OnLobbyStateUpdated;
+        public event Action<MatchStateDto>? OnMatchStateUpdated;
+        public event Action<DeliveryResult>? OnDeliveryResult;
 
         public GameConnection(GameClientOptions options, ClientState state)
         {
@@ -53,6 +55,16 @@ namespace KitchenOrchestrator.GameClient.Connection
                     OnLobbyStateUpdated?.Invoke(lobbyState);
                 });
 
+                _connection.On<MatchStateDto>("MatchStateUpdated", (matchState) =>
+                {
+                    OnMatchStateUpdated?.Invoke(matchState);
+                });
+
+                _connection.On<DeliveryResult>("DeliveryResult", (result) =>
+                {
+                    OnDeliveryResult?.Invoke(result);
+                });
+
                 await _connection.StartAsync();
                 return true;
             }
@@ -86,6 +98,14 @@ namespace KitchenOrchestrator.GameClient.Connection
                 throw new InvalidOperationException("Cannot send ready status: Not connected to server.");
 
             await _connection.InvokeAsync("PlayerReady", sessionId);
+        }
+
+        public async Task DeliverDishAsync(Guid sessionId, List<Ingredient> ingredients)
+        {
+            if (_connection == null || _connection.State != HubConnectionState.Connected)
+                throw new InvalidOperationException("Cannot deliver dish: Not connected to server.");
+
+            await _connection.InvokeAsync("DeliverDish", sessionId, ingredients);
         }
 
         public async Task DisconnectAsync()
