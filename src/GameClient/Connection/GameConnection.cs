@@ -1,7 +1,6 @@
 using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
-using KitchenOrchestrator.Shared.GameLogic.Recipes;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace KitchenOrchestrator.GameClient.Connection
@@ -100,7 +99,7 @@ namespace KitchenOrchestrator.GameClient.Connection
             await _connection.InvokeAsync("PlayerReady", sessionId);
         }
 
-        public async Task DeliverDishAsync(Guid sessionId, List<Ingredient> ingredients)
+        public async Task DeliverDishAsync(Guid sessionId, List<string> ingredients)
         {
             if (_connection == null || _connection.State != HubConnectionState.Connected)
                 throw new InvalidOperationException("Cannot deliver dish: Not connected to server.");

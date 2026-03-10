@@ -120,9 +120,12 @@ namespace KitchenOrchestrator.GameServer.Hubs
             }
         }
 
-        public async Task DeliverDish(Guid sessionId, List<Ingredient> ingredients)
+       public async Task DeliverDish(Guid sessionId, List<string> ingredientNames)
         {
             var playerId = (Guid)Context.Items["PlayerId"]!;
+            var ingredients = ingredientNames
+                .Select(name => Enum.Parse<Ingredient>(name, ignoreCase: true))
+                .ToList();
             var result = _matchSimulation.DeliverDish(sessionId, playerId, ingredients);
             await Clients.Caller.SendAsync("DeliveryResult", result);
         }
