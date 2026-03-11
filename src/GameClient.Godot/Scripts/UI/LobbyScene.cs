@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 using System;
 using System.Linq;
 using KitchenOrchestrator.GameClient.Godot;
@@ -13,78 +13,117 @@ public partial class LobbyScene : Control
     private Button _leaveButton = null!;
 
     private bool _isHost = false;
-    private LobbyStateDto? _latestLobbyState; // Field to hold state for thread-safe UI updates
+    private LobbyStateDto? _latestLobbyState;
+    private string? _errorToShow = null;
 
     public override void _Ready()
     {
-        // Get Node References
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
         _playerListContainer = GetNode<VBoxContainer>("VBoxContainer/PlayerListContainer");
         _mapOptionButton = GetNode<OptionButton>("VBoxContainer/MapOptionButton");
         _readyButton = GetNode<Button>("VBoxContainer/ReadyButton");
         _leaveButton = GetNode<Button>("VBoxContainer/LeaveButton");
 
-        // Initial State
+        // Ready is always disabled until server confirms a map is selected
         _readyButton.Disabled = true;
         _mapOptionButton.Disabled = true;
         _statusLabel.Text = "Connected to Server";
 
-        // Setup Map Options
+        // First item is a placeholder — selecting it won't send ChangeMap
         _mapOptionButton.Clear();
-        _mapOptionButton.AddItem("Salad Bar", 0);   
-        _mapOptionButton.AddItem("Sushi Bar", 1);   
-        _mapOptionButton.AddItem("Burger Diner", 2); 
+        _mapOptionButton.AddItem("— Select Map —", 0);
+        _mapOptionButton.AddItem("Salad Bar", 1);
+        _mapOptionButton.AddItem("Sushi Bar", 2);
+        _mapOptionButton.AddItem("Burger Diner", 3);
 
-        // Wire Signals
         _readyButton.Pressed += OnReadyPressed;
         _leaveButton.Pressed += OnLeavePressed;
         _mapOptionButton.ItemSelected += OnMapChanged;
 
-        // Subscribe to SignalR events
         Bootstrap.Connection.OnLobbyStateUpdated += OnLobbyStateUpdated;
         Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
-        
-        if (Bootstrap.State.CurrentSessionId.HasValue)
-        {
-            _readyButton.Disabled = false;
-        }
+        Bootstrap.Connection.OnError += OnServerError;
     }
 
     private async void OnReadyPressed()
     {
-        if (Bootstrap.State.CurrentSessionId.HasValue)
+        if (!Bootstrap.State.CurrentSessionId.HasValue)
         {
+            GD.PrintErr("OnReadyPressed: CurrentSessionId is null!");
+            return;
+        }
+
+        try
+        {
+            GD.Print($"Sending ready for session {Bootstrap.State.CurrentSessionId.Value}");
             await Bootstrap.Connection.SendReadyAsync(Bootstrap.State.CurrentSessionId.Value);
             _readyButton.Disabled = true;
             _statusLabel.Text = "Ready! Waiting for others...";
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"OnReadyPressed FAILED: {ex.GetType().Name}: {ex.Message}");
+            _statusLabel.Text = "Error: " + ex.Message;
         }
     }
 
     private async void OnLeavePressed()
     {
-        CleanupSubscriptions();
-        await Bootstrap.Connection.DisconnectAsync();
+        try
+        {
+            CleanupSubscriptions();
+            await Bootstrap.Connection.DisconnectAsync();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"OnLeavePressed error: {ex.Message}");
+        }
         GetTree().ChangeSceneToFile("res://Scenes/UI/MainMenuScene.tscn");
     }
 
     private async void OnMapChanged(long index)
     {
+        // Index 0 is the "— Select Map —" placeholder, ignore it
+        if (index == 0) return;
         if (!_isHost || !Bootstrap.State.CurrentSessionId.HasValue) return;
 
         string levelId = index switch
         {
-            0 => "map1",
-            1 => "map2",
-            2 => "map3",
+            1 => "map1",
+            2 => "map2",
+            3 => "map3",
             _ => "map1"
         };
 
-        await Bootstrap.Connection.ChangeMapAsync(Bootstrap.State.CurrentSessionId.Value, levelId);
+        try
+        {
+            await Bootstrap.Connection.ChangeMapAsync(Bootstrap.State.CurrentSessionId.Value, levelId);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"OnMapChanged FAILED: {ex.Message}");
+            _statusLabel.Text = "Error: " + ex.Message;
+        }
+    }
+
+    private void OnServerError(string error)
+    {
+        _errorToShow = error;
+        CallDeferred(nameof(ShowError));
+    }
+
+    private void ShowError()
+    {
+        if (_errorToShow == null) return;
+        _statusLabel.Text = $"Error: {_errorToShow}";
+        // Re-enable ready button so player can try again
+        _readyButton.Disabled = false;
+        GD.PrintErr($"Server error: {_errorToShow}");
+        _errorToShow = null;
     }
 
     private void OnLobbyStateUpdated(LobbyStateDto lobbyState)
     {
-        // Store the state and defer the UI update to the main thread
         _latestLobbyState = lobbyState;
         CallDeferred(nameof(UpdateUIFromLobbyState));
     }
@@ -94,42 +133,55 @@ public partial class LobbyScene : Control
         if (_latestLobbyState == null) return;
         var lobbyState = _latestLobbyState;
 
-        // 1. Determine Host Status (Uses the PlayerId convenience property in ClientState)
         var me = lobbyState.Players.FirstOrDefault(p => p.PlayerId == Bootstrap.State.PlayerId);
         _isHost = me?.IsHost ?? false;
 
-        // 2. Update Map Selector
         _mapOptionButton.Disabled = !_isHost;
-        
-        int mapIndex = lobbyState.LevelId switch
+
+        // Sync dropdown to server state — only update if server has a map set
+        if (lobbyState.LevelId != null)
         {
-            "map1" => 0,
-            "map2" => 1,
-            "map3" => 2,
-            _ => 0
-        };
-        
-        if (_mapOptionButton.Selected != mapIndex)
+            int mapIndex = lobbyState.LevelId switch
+            {
+                "map1" => 1,
+                "map2" => 2,
+                "map3" => 3,
+                _ => 0
+            };
+            if (_mapOptionButton.Selected != mapIndex)
+                _mapOptionButton.Select(mapIndex);
+        }
+        else
         {
-            _mapOptionButton.Select(mapIndex);
+            // No map selected yet — show placeholder
+            if (_mapOptionButton.Selected != 0)
+                _mapOptionButton.Select(0);
         }
 
-        // 3. Rebuild Player List UI
+        // Ready button only enabled when a map is confirmed server-side
+        _readyButton.Disabled = lobbyState.LevelId == null;
+
+        // Rebuild player list
         foreach (Node child in _playerListContainer.GetChildren())
-        {
             child.QueueFree();
-        }
 
         foreach (var player in lobbyState.Players)
         {
             var label = new Label();
             string hostTag = player.IsHost ? " [HOST]" : "";
-            string readyTag = player.IsReady ? " (READY)" : " (Joining...)";
+            string readyTag = player.IsReady ? " ✓" : "";
             label.Text = $"{player.DisplayName}{hostTag}{readyTag}";
             _playerListContainer.AddChild(label);
         }
 
-        _statusLabel.Text = _isHost ? "You are the Host" : "Waiting for Host...";
+        if (_isHost)
+            _statusLabel.Text = lobbyState.LevelId == null
+                ? "You are the Host — select a map to start"
+                : $"You are the Host — {lobbyState.LevelId} selected";
+        else
+            _statusLabel.Text = lobbyState.LevelId == null
+                ? "Waiting for host to select a map..."
+                : $"Map: {lobbyState.LevelId} — Ready up!";
     }
 
     private void OnMatchStarted(Guid sessionId)
@@ -147,6 +199,7 @@ public partial class LobbyScene : Control
     {
         Bootstrap.Connection.OnLobbyStateUpdated -= OnLobbyStateUpdated;
         Bootstrap.Connection.OnMatchStarted -= OnMatchStarted;
+        Bootstrap.Connection.OnError -= OnServerError;
     }
 
     public override void _ExitTree()

@@ -166,7 +166,7 @@ public partial class Player : CharacterBody2D
         );
 
         // Fire and forget — result comes back via MatchStateDto broadcast
-        _ = Bootstrap.Connection.SendActionAsync(actionRequest);
+        Bootstrap.Connection.SendActionAsync(actionRequest);
     }
 
     private void SendPositionToServer()
@@ -175,7 +175,7 @@ public partial class Player : CharacterBody2D
         if (!sessionId.HasValue) return;
 
         var dto = new PositionUpdateDto(sessionId.Value, Position.X, Position.Y);
-        _ = Bootstrap.Connection.SendPositionAsync(dto);
+        Bootstrap.Connection.SendPositionAsync(dto);
     }
 
     // -------------------------------------------------------------------------

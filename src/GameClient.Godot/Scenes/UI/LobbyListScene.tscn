@@ -52,6 +52,6 @@ text = "CreateButton"
 layout_mode = 2
 text = "StatusLabel"
 
-[node name="Button" type="Button" parent="VBoxContainer"]
+[node name="BackButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "BackButton"

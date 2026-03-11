@@ -104,10 +104,18 @@ public partial class LobbyListScene : Control
 
         try
         {
+            // JoinLobbyAsync now sets State.CurrentSessionId directly from the hub return value
             await Bootstrap.Connection.JoinLobbyAsync(sessionId);
-            // JoinedLobby event sets State.CurrentSessionId
-            // Wait for it — server responds with LobbyStateUpdated which triggers the transition
-            Bootstrap.Connection.OnLobbyStateUpdated += OnFirstLobbyState;
+
+            if (Bootstrap.State.CurrentSessionId.HasValue)
+            {
+                TransitionToLobby();
+            }
+            else
+            {
+                _statusLabel.Text = "Failed to join lobby.";
+                SetInteractable(true);
+            }
         }
         catch (Exception ex)
         {
@@ -119,8 +127,8 @@ public partial class LobbyListScene : Control
 
     private void OnFirstLobbyState(LobbyStateDto _)
     {
+        // No longer needed — kept to avoid breaking any lingering subscriptions
         Bootstrap.Connection.OnLobbyStateUpdated -= OnFirstLobbyState;
-        CallDeferred(nameof(TransitionToLobby));
     }
 
     private void OnServerError(string message)

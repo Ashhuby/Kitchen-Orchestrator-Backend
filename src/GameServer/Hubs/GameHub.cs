@@ -65,10 +65,6 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
         // ── Lobby List ────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Returns all open lobbies to display in the lobby list screen.
-        /// Client calls this on entering the lobby list screen, and can poll/refresh.
-        /// </summary>
         public Task<IReadOnlyList<LobbyInfoDto>> GetLobbies()
         {
             var open = _sessionService.GetOpenSessions();
@@ -78,15 +74,12 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 s.Players.FirstOrDefault(p => p.ConnectionId == s.HostConnectionId)?.DisplayName ?? "Unknown",
                 s.Players.Count,
                 s.MaxPlayers,
-                s.LevelId   // null until host picks a map — shown as "No map selected"
+                s.LevelId
             )).ToList().AsReadOnly();
 
             return Task.FromResult<IReadOnlyList<LobbyInfoDto>>(dtos);
         }
 
-        /// <summary>
-        /// Creates a new named lobby. Caller becomes the host.
-        /// </summary>
         public async Task<LobbyCreatedDto> CreateLobby(string lobbyName)
         {
             var playerId = GetPlayerId();
@@ -110,29 +103,25 @@ namespace KitchenOrchestrator.GameServer.Hubs
             return new LobbyCreatedDto(session.SessionId);
         }
 
-        /// <summary>
-        /// Joins an existing lobby by session ID.
-        /// Returns the current lobby state so the client can render immediately.
-        /// </summary>
-        public async Task JoinLobby(Guid sessionId)
+        public async Task<Guid?> JoinLobby(Guid sessionId)
         {
             var session = _sessionService.GetSession(sessionId);
             if (session == null)
             {
                 await Clients.Caller.SendAsync("Error", "Lobby not found.");
-                return;
+                return null;
             }
 
             if (session.State != MatchState.Lobby)
             {
                 await Clients.Caller.SendAsync("Error", "That match has already started.");
-                return;
+                return null;
             }
 
             if (session.Players.Count >= session.MaxPlayers)
             {
                 await Clients.Caller.SendAsync("Error", "Lobby is full.");
-                return;
+                return null;
             }
 
             var playerId = GetPlayerId();
@@ -142,12 +131,10 @@ namespace KitchenOrchestrator.GameServer.Hubs
             _sessionService.AddPlayerToSession(sessionId, player);
             await Groups.AddToGroupAsync(Context.ConnectionId, sessionId.ToString());
 
-            // Tell the joiner which session they're in
-            await Clients.Caller.SendAsync("JoinedLobby", sessionId);
-
-            // Broadcast updated lobby state to everyone including the new joiner
             await Clients.Group(sessionId.ToString())
                 .SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+
+            return sessionId;
         }
 
         // ── In-Lobby ──────────────────────────────────────────────────────────
@@ -171,20 +158,37 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
         public async Task PlayerReady(Guid sessionId)
         {
+            _logger.LogInformation("PlayerReady called: session={SessionId} connection={ConnectionId}",
+                sessionId, Context.ConnectionId);
+
             var session = _sessionService.GetSession(sessionId);
-            if (session == null) return;
-
-            var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
-            if (player == null) return;
-
-            player.IsReady = true;
+            if (session == null)
+            {
+                _logger.LogWarning("PlayerReady: session {SessionId} not found.", sessionId);
+                return;
+            }
 
             bool shouldStart = false;
             string? startError = null;
 
+            // IsReady must be set INSIDE the lock to avoid the race where both players
+            // enter the ready check before either has set their flag.
             lock (session.Players)
             {
+                var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
+                if (player == null)
+                {
+                    _logger.LogWarning("PlayerReady: connection {ConnectionId} not found in session {SessionId}",
+                        Context.ConnectionId, sessionId);
+                    return;
+                }
+
+                player.IsReady = true;
+
                 bool allReady = session.Players.All(p => p.IsReady);
+                _logger.LogInformation("PlayerReady: {Count} players, allReady={AllReady}, state={State}, levelId={LevelId}",
+                    session.Players.Count, allReady, session.State, session.LevelId ?? "null");
+
                 if (allReady && session.Players.Count >= 2 && session.State == MatchState.Lobby)
                 {
                     if (session.LevelId == null)
@@ -201,8 +205,6 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
             if (startError != null)
             {
-                // Unready the player and tell them why
-                player.IsReady = false;
                 await Clients.Caller.SendAsync("Error", startError);
                 return;
             }
@@ -242,8 +244,6 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
             if (player == null) return;
 
-            // TODO: proximity check using station world positions once LevelStationLayout exists
-
             switch (request.ActionType)
             {
                 case StationActionType.Pickup:
@@ -273,7 +273,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
         {
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
             if (station.Type != StationType.IngredientSource) return;
-            if (player.HeldItem != null) return; // Already holding something
+            if (player.HeldItem != null) return;
 
             player.HeldItem = new HeldItem(station.SourceIngredient!.Value);
             await BroadcastMatchState(session);
@@ -283,12 +283,11 @@ namespace KitchenOrchestrator.GameServer.Hubs
         {
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
             if (player.HeldItem == null) return;
-            if (station.HeldItem != null) return; // Station occupied
+            if (station.HeldItem != null) return;
 
             station.HeldItem = player.HeldItem;
             player.HeldItem = null;
 
-            // Stove auto-starts on deposit — 10 seconds to cook
             if (station.Type == StationType.Stove)
                 station.BeginProcessing(10f);
 
@@ -300,10 +299,9 @@ namespace KitchenOrchestrator.GameServer.Hubs
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
             if (station.Type != StationType.ChoppingBoard) return;
             if (station.HeldItem == null) return;
-            if (station.OccupyingPlayerId != null) return; // Someone else prepping
+            if (station.OccupyingPlayerId != null) return;
 
             station.OccupyingPlayerId = player.PlayerId;
-            // 5 seconds to chop — will be configurable per station when level design is done
             station.BeginProcessing(5f);
             await BroadcastMatchState(session);
         }

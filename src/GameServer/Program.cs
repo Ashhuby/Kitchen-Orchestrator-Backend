@@ -11,7 +11,7 @@ builder.Services.Configure<ServerAuthOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<GameServerOptions>(builder.Configuration.GetSection("GameServer"));
 
 // Core Services
-// AddSignalR automatically registers IHubContext<T> for all hubs — GameLoopService uses IHubContext<GameHub>
+// AddSignalR automatically registers IHubContext<T> for all hubs ï¿½ GameLoopService uses IHubContext<GameHub>
 builder.Services.AddSignalR();
 
 // Shared Security
@@ -19,11 +19,12 @@ builder.Services.AddSingleton<IJwtValidationService, JwtValidationService>();
 
 // Game Server Logic
 builder.Services.AddSingleton<IMatchSessionService, MatchSessionService>();
+builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>();
 
 // HttpClient-managed outbound pipeline for match result submission
 builder.Services.AddHttpClient<IMatchResultSubmissionService, MatchResultSubmissionService>();
 
-// Background tick loop — IHubContext<GameHub> is injected automatically
+// Background tick loop ï¿½ IHubContext<GameHub> is injected automatically
 builder.Services.AddHostedService<GameLoopService>();
 
 var app = builder.Build();
