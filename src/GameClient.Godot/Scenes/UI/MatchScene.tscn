@@ -1,5 +1,4 @@
-```
-[gd_scene load_steps=2 format=3 uid="uid://dx77cy2sqovcr"]
+[gd_scene load_steps=2 format=3 uid="uid://oa4rrjcsl2ar"]
 
 [ext_resource type="Script" path="res://Scripts/UI/MatchScene.cs" id="1_ubn5d"]
 

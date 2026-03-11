@@ -13,37 +13,33 @@ public partial class LobbyScene : Control
     private Button _leaveButton = null!;
 
     private bool _isHost = false;
-    private LobbyStateDto? _latestLobbyState; // Field to hold state for thread-safe UI updates
+    private LobbyStateDto? _latestLobbyState;
 
     public override void _Ready()
     {
-        // Get Node References
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
         _playerListContainer = GetNode<VBoxContainer>("VBoxContainer/PlayerListContainer");
         _mapOptionButton = GetNode<OptionButton>("VBoxContainer/MapOptionButton");
         _readyButton = GetNode<Button>("VBoxContainer/ReadyButton");
         _leaveButton = GetNode<Button>("VBoxContainer/LeaveButton");
 
-        // Initial State
         _readyButton.Disabled = true;
         _mapOptionButton.Disabled = true;
         _statusLabel.Text = "Connected to Server";
 
-        // Setup Map Options
         _mapOptionButton.Clear();
-        _mapOptionButton.AddItem("Salad Bar", 0);   
-        _mapOptionButton.AddItem("Sushi Bar", 1);   
-        _mapOptionButton.AddItem("Burger Diner", 2); 
+        _mapOptionButton.AddItem("TEST (5s)", 0);
+        _mapOptionButton.AddItem("Salad Bar", 1);
+        _mapOptionButton.AddItem("Sushi Bar", 2);
+        _mapOptionButton.AddItem("Burger Diner", 3);
 
-        // Wire Signals
         _readyButton.Pressed += OnReadyPressed;
         _leaveButton.Pressed += OnLeavePressed;
         _mapOptionButton.ItemSelected += OnMapChanged;
 
-        // Subscribe to SignalR events
         Bootstrap.Connection.OnLobbyStateUpdated += OnLobbyStateUpdated;
         Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
-        
+
         if (Bootstrap.State.CurrentSessionId.HasValue)
         {
             _readyButton.Disabled = false;
@@ -73,10 +69,11 @@ public partial class LobbyScene : Control
 
         string levelId = index switch
         {
-            0 => "map1",
-            1 => "map2",
-            2 => "map3",
-            _ => "map1"
+            0 => "map0",
+            1 => "map1",
+            2 => "map2",
+            3 => "map3",
+            _ => "map0"
         };
 
         await Bootstrap.Connection.ChangeMapAsync(Bootstrap.State.CurrentSessionId.Value, levelId);
@@ -84,7 +81,6 @@ public partial class LobbyScene : Control
 
     private void OnLobbyStateUpdated(LobbyStateDto lobbyState)
     {
-        // Store the state and defer the UI update to the main thread
         _latestLobbyState = lobbyState;
         CallDeferred(nameof(UpdateUIFromLobbyState));
     }
@@ -94,27 +90,25 @@ public partial class LobbyScene : Control
         if (_latestLobbyState == null) return;
         var lobbyState = _latestLobbyState;
 
-        // 1. Determine Host Status (Uses the PlayerId convenience property in ClientState)
         var me = lobbyState.Players.FirstOrDefault(p => p.PlayerId == Bootstrap.State.PlayerId);
         _isHost = me?.IsHost ?? false;
 
-        // 2. Update Map Selector
         _mapOptionButton.Disabled = !_isHost;
-        
+
         int mapIndex = lobbyState.LevelId switch
         {
-            "map1" => 0,
-            "map2" => 1,
-            "map3" => 2,
+            "map0" => 0,
+            "map1" => 1,
+            "map2" => 2,
+            "map3" => 3,
             _ => 0
         };
-        
+
         if (_mapOptionButton.Selected != mapIndex)
         {
             _mapOptionButton.Select(mapIndex);
         }
 
-        // 3. Rebuild Player List UI
         foreach (Node child in _playerListContainer.GetChildren())
         {
             child.QueueFree();
