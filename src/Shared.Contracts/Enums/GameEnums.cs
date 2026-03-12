@@ -38,12 +38,12 @@ namespace KitchenOrchestrator.Shared.Contracts.Enums
     // The server resolves which is valid based on station type + player held item.
     public enum StationActionType
     {
-        Pickup = 0,      // Ingredient source: give player raw ingredient
-        Deposit = 1,     // Chopping board / stove: place held item onto station
-        BeginPrep = 2,   // Chopping board: start timed prep (player must stay)
-        CancelPrep = 3,  // Chopping board: player walks away — resets progress
-        Collect = 4,     // Chopping board / stove: take finished item off station
-        Deliver = 5      // Delivery counter: submit held item against active orders
+        Pickup = 0,      // IngredientSource: give player raw ingredient
+        Deposit = 1,     // ChoppingBoard / Stove / Counter: place held item onto station
+        BeginPrep = 2,   // ChoppingBoard: start timed prep (player must stay)
+        CancelPrep = 3,  // ChoppingBoard: player walks away â€” resets progress
+        Collect = 4,     // ChoppingBoard / Stove / Counter: take item off station
+        Deliver = 5      // DeliveryCounter: submit held item against active orders
     }
 
     // Tracks how far through the cooking pipeline an ingredient is.
@@ -52,7 +52,7 @@ namespace KitchenOrchestrator.Shared.Contracts.Enums
         Raw = 0,
         Chopped = 1,
         Cooked = 2,
-        Burned = 3       // Overcooked hahahaha — item must be discarded, cannot be recovered
+        Burned = 3       // Item must be discarded, cannot be recovered
     }
 
     public enum StationType
@@ -60,6 +60,7 @@ namespace KitchenOrchestrator.Shared.Contracts.Enums
         IngredientSource = 0,
         ChoppingBoard = 1,
         Stove = 2,
-        DeliveryCounter = 3
+        DeliveryCounter = 3,
+        Counter = 4      // Passive pass-through â€” players deposit/pick up items here
     }
 }

@@ -4,20 +4,6 @@ using System.Collections.Generic;
 using KitchenOrchestrator.GameClient.Godot;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 
-/// <summary>
-/// Lobby list screen. Sits between MainMenu and LobbyScene.
-/// Scene tree expected:
-///   LobbyListScene (Control) ← this script
-///   └── VBoxContainer
-///       ├── TitleLabel       (Label)
-///       ├── LobbyContainer   (VBoxContainer) ← lobby rows injected here
-///       ├── RefreshButton    (Button)
-///       ├── HSeparator       (HSeparator)
-///       ├── LobbyNameInput   (LineEdit)  ← name for new lobby
-///       ├── CreateButton     (Button)
-///       ├── StatusLabel      (Label)
-///       └── BackButton       (Button)
-/// </summary>
 public partial class LobbyListScene : Control
 {
     private VBoxContainer _lobbyContainer = null!;
@@ -45,10 +31,8 @@ public partial class LobbyListScene : Control
         Bootstrap.Connection.OnError += OnServerError;
 
         _statusLabel.Text = "";
-        OnRefreshPressed(); // Auto-refresh on enter
+        OnRefreshPressed();
     }
-
-    // ── Event Handlers ────────────────────────────────────────────────────────
 
     private async void OnRefreshPressed()
     {
@@ -84,8 +68,6 @@ public partial class LobbyListScene : Control
         try
         {
             var result = await Bootstrap.Connection.CreateLobbyAsync(name);
-            // Server will have sent JoinedLobby event setting State.CurrentSessionId.
-            // Give it one frame to process, then transition.
             Bootstrap.State.CurrentSessionId = result.SessionId;
             TransitionToLobby();
         }
@@ -104,13 +86,10 @@ public partial class LobbyListScene : Control
 
         try
         {
-            // JoinLobbyAsync now sets State.CurrentSessionId directly from the hub return value
             await Bootstrap.Connection.JoinLobbyAsync(sessionId);
 
             if (Bootstrap.State.CurrentSessionId.HasValue)
-            {
                 TransitionToLobby();
-            }
             else
             {
                 _statusLabel.Text = "Failed to join lobby.";
@@ -125,16 +104,8 @@ public partial class LobbyListScene : Control
         }
     }
 
-    private void OnFirstLobbyState(LobbyStateDto _)
-    {
-        // No longer needed — kept to avoid breaking any lingering subscriptions
-        Bootstrap.Connection.OnLobbyStateUpdated -= OnFirstLobbyState;
-    }
-
-    private void OnServerError(string message)
-    {
+    private void OnServerError(string message) =>
         CallDeferred(nameof(ShowError), message);
-    }
 
     private void ShowError(string message)
     {
@@ -148,8 +119,6 @@ public partial class LobbyListScene : Control
         GetTree().ChangeSceneToFile("res://Scenes/UI/MainMenuScene.tscn");
     }
 
-    // ── UI Helpers ────────────────────────────────────────────────────────────
-
     private void RebuildLobbyList()
     {
         foreach (Node child in _lobbyContainer.GetChildren())
@@ -159,17 +128,16 @@ public partial class LobbyListScene : Control
 
         foreach (var lobby in _lobbies)
         {
-            // Each lobby entry is a horizontal row
             var row = new HBoxContainer();
 
             var info = new Label();
             string mapText = lobby.LevelId ?? "No map";
-            info.Text = $"{lobby.LobbyName}  [{lobby.PlayerCount}/{lobby.MaxPlayers}]  {mapText}  — Host: {lobby.HostName}";
+            // Fixed: was lobby.HostName, correct property is HostDisplayName
+            info.Text = $"{lobby.LobbyName}  [{lobby.PlayerCount}/{lobby.MaxPlayers}]  {mapText}  — Host: {lobby.HostDisplayName}";
             info.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
 
             var joinBtn = new Button();
             joinBtn.Text = "Join";
-            // Capture loop variable
             var capturedId = lobby.SessionId;
             joinBtn.Pressed += () => OnJoinPressed(capturedId);
 
@@ -181,16 +149,14 @@ public partial class LobbyListScene : Control
 
     private void SetInteractable(bool enabled)
     {
-        _refreshButton.Disabled = !enabled;
-        _createButton.Disabled  = !enabled;
+        _refreshButton.Disabled  = !enabled;
+        _createButton.Disabled   = !enabled;
         _lobbyNameInput.Editable = enabled;
 
         foreach (Node child in _lobbyContainer.GetChildren())
-        {
             if (child is HBoxContainer row)
                 foreach (Node rowChild in row.GetChildren())
                     if (rowChild is Button btn) btn.Disabled = !enabled;
-        }
     }
 
     private void TransitionToLobby()
@@ -202,7 +168,6 @@ public partial class LobbyListScene : Control
     private void Cleanup()
     {
         Bootstrap.Connection.OnError -= OnServerError;
-        Bootstrap.Connection.OnLobbyStateUpdated -= OnFirstLobbyState;
     }
 
     public override void _ExitTree() => Cleanup();

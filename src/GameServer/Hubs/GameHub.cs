@@ -168,33 +168,85 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
-            if (player == null)
-            {
-                _logger.LogWarning("PlayerReady: player not found in session {SessionId}.", sessionId);
-                return;
-            }
-
             bool shouldStart = false;
+            string? startError = null;
 
             lock (session.Players)
             {
+                var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
+                if (player == null)
+                {
+                    _logger.LogWarning("PlayerReady: connection {ConnectionId} not found in session {SessionId}",
+                        Context.ConnectionId, sessionId);
+                    return;
+                }
+
                 player.IsReady = true;
+
                 bool allReady = session.Players.All(p => p.IsReady);
+                _logger.LogInformation("PlayerReady: {Count} players, allReady={AllReady}, state={State}, levelId={LevelId}",
+                    session.Players.Count, allReady, session.State, session.LevelId ?? "null");
+
                 if (allReady && session.Players.Count >= 2 && session.State == MatchState.Lobby)
                 {
-                    session.Start();
-                    shouldStart = true;
+                    if (session.LevelId == null)
+                        startError = "Cannot start — no map selected. Host must choose a map first.";
+                    else
+                    {
+                        session.Start();
+                        shouldStart = true;
+                    }
                 }
             }
 
-            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+            if (startError != null)
+            {
+                await Clients.Caller.SendAsync("Error", startError);
+                return;
+            }
+
+            await Clients.Group(sessionId.ToString())
+                .SendAsync("LobbyStateUpdated", BuildLobbyState(session));
 
             if (shouldStart)
             {
-                _logger.LogInformation("Session {SessionId} conditions met. Starting match.", sessionId);
+                _logger.LogInformation("Session {SessionId} starting on level {LevelId}.",
+                    sessionId, session.LevelId);
                 await Clients.Group(sessionId.ToString()).SendAsync("MatchStarted", sessionId);
             }
+        }
+
+        // ── Station Layout ────────────────────────────────────────────────────
+
+        public async Task ReportStationLayout(Guid sessionId, List<StationLayoutDto> stations)
+        {
+            var session = _sessionService.GetSession(sessionId);
+            if (session == null) return;
+            if (Context.ConnectionId != session.HostConnectionId) return;
+            if (session.State != MatchState.Active) return;
+            if (session.Stations.Count > 0) return;
+
+            foreach (var dto in stations)
+            {
+                if (!Enum.TryParse<StationType>(dto.StationType, ignoreCase: true, out var stationType))
+                {
+                    _logger.LogWarning("ReportStationLayout: unknown StationType '{Type}' for station {Id}",
+                        dto.StationType, dto.StationId);
+                    continue;
+                }
+
+                Ingredient? sourceIngredient = null;
+                if (!string.IsNullOrEmpty(dto.SourceIngredient) &&
+                    Enum.TryParse<Ingredient>(dto.SourceIngredient, ignoreCase: true, out var ingredient))
+                    sourceIngredient = ingredient;
+
+                session.Stations[dto.StationId] = new StationState(dto.StationId, stationType, sourceIngredient);
+            }
+
+            _logger.LogInformation("Session {SessionId} station layout reported: {Count} stations.",
+                sessionId, session.Stations.Count);
+
+            await BroadcastMatchState(session);
         }
 
         // ── In-Match ──────────────────────────────────────────────────────────
@@ -249,10 +301,21 @@ namespace KitchenOrchestrator.GameServer.Hubs
         private async Task HandlePickup(MatchSession session, ConnectedPlayer player, string stationId)
         {
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
-            if (station.Type != StationType.IngredientSource) return;
+            if (station.Type != StationType.IngredientSource && station.Type != StationType.Counter) return;
             if (player.HeldItem != null) return;
 
-            player.HeldItem = new HeldItem(station.SourceIngredient!.Value);
+            if (station.Type == StationType.IngredientSource)
+            {
+                if (station.SourceIngredient == null) return;
+                player.HeldItem = new HeldItem(station.SourceIngredient.Value);
+            }
+            else
+            {
+                if (station.HeldItem == null) return;
+                player.HeldItem = station.HeldItem;
+                station.HeldItem = null;
+            }
+
             await BroadcastMatchState(session);
         }
 
@@ -261,6 +324,8 @@ namespace KitchenOrchestrator.GameServer.Hubs
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
             if (player.HeldItem == null) return;
             if (station.HeldItem != null) return;
+            if (station.Type == StationType.IngredientSource) return;
+            if (station.Type == StationType.DeliveryCounter) return;
 
             station.HeldItem = player.HeldItem;
             player.HeldItem = null;
@@ -296,8 +361,17 @@ namespace KitchenOrchestrator.GameServer.Hubs
         private async Task HandleCollect(MatchSession session, ConnectedPlayer player, string stationId)
         {
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
-            if (!station.IsComplete) return;
             if (player.HeldItem != null) return;
+
+            if (station.Type == StationType.ChoppingBoard || station.Type == StationType.Stove)
+            {
+                if (!station.IsComplete) return;
+            }
+            else if (station.Type == StationType.Counter)
+            {
+                if (station.HeldItem == null) return;
+            }
+            else return;
 
             player.HeldItem = station.HeldItem;
             station.HeldItem = null;
@@ -315,7 +389,13 @@ namespace KitchenOrchestrator.GameServer.Hubs
             var result = _simulationService.TryDeliver(session, player.PlayerId, new List<Ingredient> { player.HeldItem.Ingredient });
 
             if (result.Success)
+            {
                 player.HeldItem = null;
+                player.Score += result.ScoreAwarded;
+                session.TotalScore += result.ScoreAwarded;
+                if (result.IsPerfect) session.PerfectOrders++;
+                session.CompletedOrders++;
+            }
 
             await Clients.Caller.SendAsync("DeliveryResult", result);
             await BroadcastMatchState(session);
@@ -339,6 +419,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
         {
             var state = new MatchStateDto(
                 session.SessionId,
+                session.State.ToString(),
                 session.Players.Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y)).ToList().AsReadOnly(),
                 session.Stations.Values.Select(s => new StationStateDto(
                     s.StationId,

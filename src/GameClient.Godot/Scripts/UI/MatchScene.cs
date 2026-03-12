@@ -1,149 +1,177 @@
 using Godot;
-using System;
-using System.Collections.Generic;
 using KitchenOrchestrator.GameClient.Godot;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
+using System;
+using System.Collections.Generic; 
+using System.Linq;
 
+/// <summary>
+/// Root scene for an active match.
+/// Owns the player dictionary and the station dictionary.
+/// Receives MatchStateUpdated broadcasts and fans them out to Player and Station nodes.
+/// </summary>
 public partial class MatchScene : Control
 {
-    // ── Node References ───────────────────────────────────────────────────────
-
-    private Label _statusLabel = null!;
+    // ── Child nodes ───────────────────────────────────────────────────────────
     private Label _timerLabel = null!;
     private Label _scoreLabel = null!;
-    private Node2D _worldRoot = null!;
+    private Node2D _playerContainer = null!;
+    private Node2D _stationContainer = null!;
 
-    // ── Player Tracking ───────────────────────────────────────────────────────
+    // ── Runtime state ─────────────────────────────────────────────────────────
+    private readonly Dictionary<Guid, Player> _players = new();
 
-    private readonly Dictionary<Guid, Player> _spawnedPlayers = new();
-    private PackedScene _playerScene = null!;
+    // StationId → Station node — populated from scene tree on _Ready
+    private readonly Dictionary<string, Station> _stations = new();
 
-    // ── Latest State (set from SignalR thread, applied on main thread) ─────────
+    private MatchStateDto? _pendingState;
 
-    private MatchStateDto? _latestState;
-
-    // ── Spawn Positions ───────────────────────────────────────────────────────
-
-    private static readonly Vector2[] SpawnPositions = new[]
-    {
-        new Vector2(200f, 300f),
-        new Vector2(400f, 300f),
-        new Vector2(200f, 500f),
-        new Vector2(400f, 500f),
-    };
-
-    // ── Godot Lifecycle ───────────────────────────────────────────────────────
+    // Packed scene for remote players (local player is instantiated separately)
+    [Export] public PackedScene? PlayerScene { get; set; }
 
     public override void _Ready()
     {
-        _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
-        _timerLabel  = GetNode<Label>("VBoxContainer/TimerLabel");
-        _scoreLabel  = GetNode<Label>("VBoxContainer/ScoreLabel");
-        _worldRoot   = GetNode<Node2D>("World");
+        _timerLabel = GetNode<Label>("HUD/TimerLabel");
+        _scoreLabel = GetNode<Label>("HUD/ScoreLabel");
+        _playerContainer = GetNode<Node2D>("PlayerContainer");
+        _stationContainer = GetNode<Node2D>("StationContainer");
 
-        _playerScene = GD.Load<PackedScene>("res://Scenes/Player.tscn");
+        // Build station lookup from whatever is placed in the scene
+        foreach (Node child in _stationContainer.GetChildren())
+        {
+            if (child is Station station && !string.IsNullOrEmpty(station.StationId))
+                _stations[station.StationId] = station;
+        }
 
-        _statusLabel.Text = "Match in progress...";
-        _timerLabel.Text  = "";
-        _scoreLabel.Text  = "Score: 0";
+        // Spawn local player at spawn point
+        SpawnLocalPlayer();
 
+        // Subscribe to server events
         Bootstrap.Connection.OnMatchStateUpdated += OnMatchStateUpdated;
-        Bootstrap.Connection.OnError += OnServerError;
+
+        // Report station layout to server (host only — server ignores duplicates)
+        if (Bootstrap.State.CurrentSessionId.HasValue)
+            CallDeferred(nameof(ReportStationLayout));
+    }
+
+    // ── Station Layout Report ─────────────────────────────────────────────────
+
+    private async void ReportStationLayout()
+    {
+        if (!Bootstrap.State.CurrentSessionId.HasValue) return;
+
+        var layout = _stations.Values.Select(s => new StationLayoutDto(
+            s.StationId,
+            s.StationType.ToString(),
+            string.IsNullOrEmpty(s.SourceIngredient) ? null : s.SourceIngredient
+        )).ToList();
+
+        try
+        {
+            await Bootstrap.Connection.ReportStationLayoutAsync(
+                Bootstrap.State.CurrentSessionId.Value, layout);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"ReportStationLayout failed: {ex.Message}");
+        }
+    }
+
+    // ── Match State ───────────────────────────────────────────────────────────
+
+    private void OnMatchStateUpdated(MatchStateDto state)
+    {
+        _pendingState = state;
+        CallDeferred(nameof(ApplyMatchState));
+    }
+
+    private void ApplyMatchState()
+    {
+        if (_pendingState == null) return;
+        var state = _pendingState;
+
+        // HUD
+        int seconds = (int)state.TimeRemaining;
+        _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
+        _scoreLabel.Text = $"Score: {state.TotalScore}";
+
+        // Players
+        foreach (var dto in state.Players)
+        {
+            if (!_players.TryGetValue(dto.PlayerId, out var playerNode))
+            {
+                playerNode = SpawnRemotePlayer(dto.PlayerId, dto.DisplayName);
+                if (playerNode == null) continue;
+            }
+
+            if (!playerNode.IsLocalPlayer)
+                playerNode.ApplySnapshot(dto.X, dto.Y);
+        }
+
+        // Stations
+        foreach (var dto in state.Stations)
+        {
+            if (_stations.TryGetValue(dto.StationId, out var stationNode))
+                stationNode.ApplyState(dto);
+        }
+
+        // Match end
+        if (state.State == "Completed" || state.State == "Abandoned")
+            HandleMatchEnd(state);
+    }
+
+    // ── Player Spawning ───────────────────────────────────────────────────────
+
+    private void SpawnLocalPlayer()
+    {
+        if (PlayerScene == null)
+        {
+            GD.PrintErr("MatchScene: PlayerScene export is not set.");
+            return;
+        }
+
+        var localPlayerId = Bootstrap.State.PlayerId;
+        if (localPlayerId == null) return;
+
+        var player = PlayerScene.Instantiate<Player>();
+        _playerContainer.AddChild(player);
+        player.Initialise(localPlayerId.Value, Bootstrap.State.Profile!.DisplayName,
+            isLocal: true, spawnPosition: new Vector2(200, 200));
+
+        _players[localPlayerId.Value] = player;
+    }
+
+    private Player? SpawnRemotePlayer(Guid playerId, string displayName)
+    {
+        if (PlayerScene == null) return null;
+
+        var player = PlayerScene.Instantiate<Player>();
+        _playerContainer.AddChild(player);
+        player.Initialise(playerId, displayName,
+            isLocal: false, spawnPosition: new Vector2(200, 200));
+
+        _players[playerId] = player;
+        return player;
+    }
+
+    // ── Match End ─────────────────────────────────────────────────────────────
+
+    private void HandleMatchEnd(MatchStateDto state)
+    {
+        CleanupSubscriptions();
+        GD.Print($"Match over. Final score: {state.TotalScore}");
+        // TODO: transition to results screen
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
+
+    private void CleanupSubscriptions()
+    {
+        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
     }
 
     public override void _ExitTree()
     {
-        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
-        Bootstrap.Connection.OnError -= OnServerError;
-    }
-
-    // ── SignalR Callbacks (background thread) ─────────────────────────────────
-
-    private void OnMatchStateUpdated(MatchStateDto state)
-    {
-        _latestState = state;
-        CallDeferred(nameof(ApplyMatchState));
-    }
-
-    private void OnServerError(string error)
-    {
-        GD.PrintErr($"MatchScene server error: {error}");
-    }
-
-    // ── Main Thread: Apply State ───────────────────────────────────────────────
-
-    private void ApplyMatchState()
-    {
-        if (_latestState == null) return;
-        var state = _latestState;
-
-        UpdateHUD(state);
-        SyncPlayers(state);
-
-        if (state.TimeRemainingSeconds <= 0)
-        {
-            _statusLabel.Text = $"Match Over! Final Score: {state.TotalScore}";
-            Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
-        }
-    }
-
-    private void UpdateHUD(MatchStateDto state)
-    {
-        int seconds = (int)state.TimeRemainingSeconds;
-        _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
-        _scoreLabel.Text = $"Score: {state.TotalScore}";
-    }
-
-    private void SyncPlayers(MatchStateDto state)
-    {
-        var localPlayerId = Bootstrap.State.PlayerId;
-        int spawnIndex = 0;
-
-        foreach (var playerDto in state.Players)
-        {
-            if (_spawnedPlayers.TryGetValue(playerDto.PlayerId, out var existing))
-            {
-                if (!existing.IsLocalPlayer)
-                    existing.ApplySnapshot(playerDto.X, playerDto.Y);
-            }
-            else
-            {
-                var spawnPos = spawnIndex < SpawnPositions.Length
-                    ? SpawnPositions[spawnIndex]
-                    : new Vector2(300f + spawnIndex * 60f, 300f);
-
-                bool isLocal = playerDto.PlayerId == localPlayerId;
-                SpawnPlayer(playerDto.PlayerId, playerDto.DisplayName, isLocal, spawnPos);
-                spawnIndex++;
-            }
-        }
-
-        var arrived = new HashSet<Guid>();
-        foreach (var p in state.Players) arrived.Add(p.PlayerId);
-
-        foreach (var id in new List<Guid>(_spawnedPlayers.Keys))
-        {
-            if (!arrived.Contains(id))
-            {
-                _spawnedPlayers[id].QueueFree();
-                _spawnedPlayers.Remove(id);
-            }
-        }
-    }
-
-    private void SpawnPlayer(Guid playerId, string displayName, bool isLocal, Vector2 position)
-    {
-        if (_playerScene == null)
-        {
-            GD.PrintErr("MatchScene: _playerScene is null — Player.tscn failed to load.");
-            return;
-        }
-
-        var instance = _playerScene.Instantiate<Player>();
-        _worldRoot.AddChild(instance);
-        instance.Initialise(playerId, displayName, isLocal, position);
-        _spawnedPlayers[playerId] = instance;
-
-        GD.Print($"Spawned {(isLocal ? "(local)" : "(remote)")} player {displayName} at {position}");
+        CleanupSubscriptions();
     }
 }

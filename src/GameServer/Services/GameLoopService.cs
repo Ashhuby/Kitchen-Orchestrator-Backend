@@ -2,7 +2,6 @@ using KitchenOrchestrator.GameServer.Hubs;
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
-using KitchenOrchestrator.Shared.GameLogic.Levels;
 using KitchenOrchestrator.Shared.GameLogic.Orders;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
@@ -19,7 +18,6 @@ namespace KitchenOrchestrator.GameServer.Services
 
         private const int TickDelayMs = 100;
         private const float DeltaTime = 0.1f;
-        private const float BurnGracePeriodSeconds = 5f;
 
         public GameLoopService(
             IMatchSessionService sessionService,
@@ -35,7 +33,7 @@ namespace KitchenOrchestrator.GameServer.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("Game Loop Service started.");
+            _logger.LogInformation("GameLoopService started.");
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -45,7 +43,7 @@ namespace KitchenOrchestrator.GameServer.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error occurred during Game Loop tick.");
+                    _logger.LogError(ex, "Error during game loop tick.");
                 }
 
                 await Task.Delay(TickDelayMs, stoppingToken);
@@ -54,165 +52,144 @@ namespace KitchenOrchestrator.GameServer.Services
 
         private async Task TickAllSessionsAsync()
         {
-            var activeSessions = _sessionService.GetActiveSessions();
-
-            foreach (var session in activeSessions)
-            {
+            var sessions = _sessionService.GetActiveSessions();
+            foreach (var session in sessions)
                 await TickSessionAsync(session);
-            }
         }
 
         private async Task TickSessionAsync(MatchSession session)
         {
             session.TimeRemainingSeconds -= DeltaTime;
 
-            if (session.TimeRemainingSeconds <= 0)
+            if (session.TimeRemainingSeconds <= 0f)
             {
-                EndMatch(session);
+                await EndMatchAsync(session);
                 return;
             }
 
-            // --- Order timers ---
+            TickOrders(session);
+            TickStations(session);
+            TrySpawnOrder(session);
+
+            await BroadcastMatchStateAsync(session);
+        }
+
+        // ── Orders ────────────────────────────────────────────────────────────
+
+        private void TickOrders(MatchSession session)
+        {
             lock (session.Orders)
             {
                 foreach (var order in session.Orders.Where(o => o.Status == OrderStatus.InProgress))
                 {
                     order.Timer.Tick(DeltaTime);
-
                     if (order.Timer.IsExpired)
                     {
                         order.Status = OrderStatus.TimedOut;
                         session.FailedOrders++;
+                        _logger.LogInformation("Order {OrderId} timed out in session {SessionId}.",
+                            order.OrderId, session.SessionId);
                     }
                 }
             }
-
-            // --- Order spawning ---
-            var levelDef = session.LevelDefinition;
-            if (levelDef != null)
-            {
-                session.TimeSinceLastOrderSpawn += DeltaTime;
-
-                if (session.TimeSinceLastOrderSpawn >= levelDef.OrderSpawnIntervalSeconds &&
-                    session.Orders.Count(o => o.Status == OrderStatus.InProgress) < levelDef.MaxSimultaneousOrders)
-                {
-                    float difficultyProgress = 1f - (session.TimeRemainingSeconds / levelDef.DurationSeconds);
-                    var recipe = OrderGenerator.Generate(difficultyProgress);
-                    var newOrder = new ActiveOrder(recipe, 60f);
-
-                    lock (session.Orders)
-                    {
-                        session.Orders.Add(newOrder);
-                    }
-
-                    session.TimeSinceLastOrderSpawn = 0f;
-                }
-            }
-
-            // --- Station ticking ---
-            TickStations(session);
-
-            await BroadcastMatchStateAsync(session);
         }
+
+        private void TrySpawnOrder(MatchSession session)
+        {
+            var levelDef = session.LevelDefinition;
+            if (levelDef == null) return;
+
+            session.TimeSinceLastOrderSpawn += DeltaTime;
+            if (session.TimeSinceLastOrderSpawn < levelDef.OrderSpawnIntervalSeconds) return;
+
+            int activeCount;
+            lock (session.Orders)
+            {
+                activeCount = session.Orders.Count(o => o.Status == OrderStatus.InProgress);
+            }
+
+            if (activeCount >= levelDef.MaxSimultaneousOrders) return;
+
+            float progress = 1f - (session.TimeRemainingSeconds / levelDef.DurationSeconds);
+            var recipe = OrderGenerator.Generate(progress);
+            var newOrder = new ActiveOrder(recipe, 60f);
+            newOrder.Status = OrderStatus.InProgress;
+
+            lock (session.Orders)
+            {
+                session.Orders.Add(newOrder);
+            }
+
+            session.TimeSinceLastOrderSpawn = 0f;
+            _logger.LogInformation("Spawned order {Recipe} in session {SessionId}.", recipe.Name, session.SessionId);
+        }
+
+        // ── Stations ──────────────────────────────────────────────────────────
 
         private void TickStations(MatchSession session)
         {
             foreach (var station in session.Stations.Values)
             {
-                if (station.HeldItem == null) continue;
+                if (station.Type == StationType.Counter ||
+                    station.Type == StationType.IngredientSource ||
+                    station.Type == StationType.DeliveryCounter)
+                    continue;
 
-                switch (station.Type)
-                {
-                    case StationType.ChoppingBoard:
-                        if (!station.OccupyingPlayerId.HasValue) continue;
-                        if (!station.IsComplete)
-                        {
-                            station.ProgressSeconds += DeltaTime;
-                            if (station.IsComplete)
-                            {
-                                station.HeldItem.PrepState = ItemPrepState.Chopped;
-                                station.OccupyingPlayerId = null;
-                                _logger.LogDebug("Station {Id}: chopping complete.", station.StationId);
-                            }
-                        }
-                        break;
-
-                    case StationType.Stove:
-                        if (station.DurationSeconds <= 0) continue;
-                        if (!station.IsComplete)
-                        {
-                            station.ProgressSeconds += DeltaTime;
-                            if (station.IsComplete)
-                            {
-                                station.HeldItem.PrepState = ItemPrepState.Cooked;
-                                _logger.LogDebug("Station {Id}: cooking complete. Burn timer started.", station.StationId);
-                            }
-                        }
-                        else if (station.HeldItem.PrepState == ItemPrepState.Cooked)
-                        {
-                            station.ProgressSeconds += DeltaTime;
-                            float burnThreshold = station.DurationSeconds + BurnGracePeriodSeconds;
-                            if (station.ProgressSeconds >= burnThreshold)
-                            {
-                                station.HeldItem.PrepState = ItemPrepState.Burned;
-                                _logger.LogInformation("Station {Id}: item burned!", station.StationId);
-                            }
-                        }
-                        break;
-                }
+                station.Tick(DeltaTime);
             }
         }
 
+        // ── Match End ─────────────────────────────────────────────────────────
+
+        private async Task EndMatchAsync(MatchSession session)
+        {
+            session.State = MatchState.Completed;
+            _logger.LogInformation("Match {SessionId} completed.", session.SessionId);
+
+            // Send the final state with State = "Completed" so clients transition out
+            await BroadcastMatchStateAsync(session);
+
+            _ = Task.Run(async () =>
+            {
+                try { await _submissionService.SubmitAsync(session); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to submit results for session {SessionId}.", session.SessionId);
+                }
+            });
+        }
+
+        // ── Broadcast ─────────────────────────────────────────────────────────
+
         private async Task BroadcastMatchStateAsync(MatchSession session)
         {
-            List<PlayerPositionDto> playerPositions;
-            lock (session.Players)
-            {
-                playerPositions = session.Players
-                    .Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y))
-                    .ToList();
-            }
+            var players = session.Players
+                .Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y))
+                .ToList()
+                .AsReadOnly();
 
-            var stationStates = session.Stations.Values
+            var stations = session.Stations.Values
                 .Select(s => new StationStateDto(
                     s.StationId,
                     s.Type.ToString(),
                     s.HeldItem?.Ingredient.ToString(),
                     s.HeldItem?.PrepState.ToString(),
                     s.ProgressNormalized,
-                    s.OccupyingPlayerId.HasValue
-                ))
-                .ToList();
+                    s.OccupyingPlayerId != null))
+                .ToList()
+                .AsReadOnly();
 
-            var matchState = new MatchStateDto(
+            var state = new MatchStateDto(
                 session.SessionId,
-                playerPositions.AsReadOnly(),
-                stationStates.AsReadOnly(),
+                session.State.ToString(),   // "Active", "Completed", "Abandoned"
+                players,
+                stations,
                 session.TimeRemainingSeconds,
-                session.TotalScore
-            );
+                session.TotalScore);
 
             await _hubContext.Clients
                 .Group(session.SessionId.ToString())
-                .SendAsync("MatchStateUpdated", matchState);
-        }
-
-        private void EndMatch(MatchSession session)
-        {
-            session.State = MatchState.Completed;
-            _logger.LogInformation("Match {SessionId} ended. Submitting results...", session.SessionId);
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _submissionService.SubmitAsync(session);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to submit results for session {SessionId}", session.SessionId);
-                }
-            });
+                .SendAsync("MatchStateUpdated", state);
         }
     }
 }

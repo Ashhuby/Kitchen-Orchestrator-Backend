@@ -1,6 +1,7 @@
 ﻿using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
+using KitchenOrchestrator.Shared.Contracts.Enums;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace KitchenOrchestrator.GameClient.Connection
@@ -37,10 +38,8 @@ namespace KitchenOrchestrator.GameClient.Connection
                     .WithUrl($"{_options.GameServerHubUrl}?access_token={_state.Jwt}")
                     .Build();
 
-                // Lobby list
                 _connection.On<Guid>("JoinedLobby", (sessionId) =>
                 {
-                    // Kept for backwards compat but session ID now comes from InvokeAsync return value
                     _state.CurrentSessionId = sessionId;
                     _state.IsConnectedToMatch = true;
                     Console.WriteLine($"Joined match session: {sessionId}");
@@ -69,6 +68,7 @@ namespace KitchenOrchestrator.GameClient.Connection
 
                 _connection.On<string>("Error", (message) =>
                 {
+                    Console.WriteLine($"Server error: {message}");
                     OnError?.Invoke(message);
                 });
 
@@ -126,7 +126,6 @@ namespace KitchenOrchestrator.GameClient.Connection
         public void SendPositionAsync(PositionUpdateDto dto)
         {
             if (_connection?.State != HubConnectionState.Connected) return;
-            // Fire and forget — dropped frames are acceptable for movement
             _ = _connection.InvokeAsync("UpdatePosition", dto);
         }
 
@@ -136,12 +135,15 @@ namespace KitchenOrchestrator.GameClient.Connection
             _ = _connection.InvokeAsync("RequestAction", request);
         }
 
-        public async Task DeliverDishAsync(Guid sessionId, List<string> ingredients)
+        /// <summary>
+        /// Reports the positions and types of all stations in the current map scene
+        /// to the server. Called once by MatchScene immediately after match start.
+        /// The server only accepts this from the host and ignores duplicates.
+        /// </summary>
+        public async Task ReportStationLayoutAsync(Guid sessionId, List<StationLayoutDto> stations)
         {
-            if (_connection == null || _connection.State != HubConnectionState.Connected)
-                throw new InvalidOperationException("Cannot deliver dish: Not connected to server.");
-
-            await _connection.InvokeAsync("DeliverDish", sessionId, ingredients);
+            EnsureConnected();
+            await _connection!.InvokeAsync("ReportStationLayout", sessionId, stations);
         }
 
         public async Task DisconnectAsync()
