@@ -41,26 +41,7 @@ public partial class MainMenuScene : Control
                 return;
             }
 
-            // Request to join a match
-            await Bootstrap.Connection.JoinMatchAsync("map0");
-
-            // Wait for the server to assign a SessionId (populated via JoinedMatch event)
-            var timeout = DateTime.UtcNow.AddSeconds(5);
-            while (!Bootstrap.State.CurrentSessionId.HasValue && DateTime.UtcNow < timeout)
-            {
-                await Task.Delay(100);
-            }
-
-            if (Bootstrap.State.CurrentSessionId.HasValue)
-            {
-                GD.Print($"Successfully joined session: {Bootstrap.State.CurrentSessionId}");
-                GetTree().ChangeSceneToFile("res://Scenes/UI/LobbyScene.tscn");
-            }
-            else
-            {
-                GD.PrintErr("Join match timed out.");
-                _onlineButton.Disabled = false;
-            }
+            GetTree().ChangeSceneToFile("res://Scenes/UI/LobbyListScene.tscn");
         }
         catch (Exception ex)
         {
