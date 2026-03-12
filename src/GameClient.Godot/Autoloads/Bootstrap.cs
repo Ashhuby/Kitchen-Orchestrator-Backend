@@ -16,11 +16,11 @@ namespace KitchenOrchestrator.GameClient.Godot
         public override void _Ready()
         {
             // Initial configuration these point to Nginx localhost for local development       
-            var options = new GameClientOptions
+           var options = new GameClientOptions
             {
-                IdentityApiBaseUrl = "http://localhost",
-                GameServerHubUrl = "http://localhost/gamehub",
-                SteamAppId = 480 // Spacewars 
+                IdentityApiBaseUrl = "http://145.241.214.219",
+                GameServerHubUrl = "http://145.241.214.219/gamehub",
+                SteamAppId = 480 // Spacewars babyyyyy
             };
 
             // Initialize the shared state

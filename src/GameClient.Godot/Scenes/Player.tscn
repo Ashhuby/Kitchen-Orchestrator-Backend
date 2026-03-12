@@ -1,0 +1,36 @@
+[gd_scene load_steps=3 format=3 uid="uid://b38m5p0g0aegi"]
+
+[ext_resource type="Script" path="res://Scripts/Player.cs" id="1_4uftg"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ussw2"]
+size = Vector2(40, 40)
+
+[node name="Player" type="CharacterBody2D"]
+collision_mask = 2
+script = ExtResource("1_4uftg")
+
+[node name="Sprite" type="ColorRect" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(1, 0, 1, 1)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -24.0
+offset_top = -41.0
+offset_right = 23.0
+offset_bottom = -18.0
+text = "Name"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_ussw2")

@@ -1,6 +1,5 @@
 using KitchenOrchestrator.GameServer.Models;
 using KitchenOrchestrator.Shared.Contracts.Enums;
-using KitchenOrchestrator.Shared.GameLogic.Levels;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -8,8 +7,9 @@ namespace KitchenOrchestrator.GameServer.Services
 {
     public interface IMatchSessionService
     {
-        MatchSession GetOrCreateSession(string levelId);
+        MatchSession CreateSession(string lobbyName);
         MatchSession? GetSession(Guid sessionId);
+        IReadOnlyList<MatchSession> GetOpenSessions();
         IReadOnlyList<MatchSession> GetActiveSessions();
         void AddPlayerToSession(Guid sessionId, ConnectedPlayer player);
         void RemovePlayer(string connectionId);
@@ -25,44 +25,35 @@ namespace KitchenOrchestrator.GameServer.Services
             _logger = logger;
         }
 
-        public MatchSession GetOrCreateSession(string levelId)
+        /// <summary>
+        /// Explicitly creates a new named lobby. Sessions are never auto-created;
+        /// the host must call this from the lobby list screen.
+        /// </summary>
+        public MatchSession CreateSession(string lobbyName)
         {
-            _logger.LogInformation(
-                "GetOrCreateSession called for {LevelId}. Total sessions: {Count}, Lobby sessions: {LobbyCount}",
-                levelId,
-                _sessions.Count,
-                _sessions.Values.Count(s => s.LevelId == levelId && s.State == MatchState.Lobby));
-
-            foreach (var s in _sessions.Values)
-            {
-                _logger.LogInformation(
-                    "Existing session {Id} LevelId={Level} State={State} Players={Count}",
-                    s.SessionId, s.LevelId, s.State, s.Players.Count);
-            }
-
-            var existingLobby = _sessions.Values.FirstOrDefault(s =>
-                s.LevelId.Equals(levelId, StringComparison.OrdinalIgnoreCase) && 
-                s.State == MatchState.Lobby);
-
-            if (existingLobby != null)
-                return existingLobby;
-
-            var levelDef = LevelRegistry.GetById(levelId);
-            if (levelDef == null)
-                throw new ArgumentException($"Level with ID {levelId} does not exist.");
-
-            var newSession = new MatchSession(levelDef);
-            _sessions.TryAdd(newSession.SessionId, newSession);
-
-            _logger.LogInformation("Created new MatchSession {SessionId} for Level {LevelId}",
-                newSession.SessionId, levelId);
-
-            return newSession;
+            var session = new MatchSession(lobbyName);
+            _sessions.TryAdd(session.SessionId, session);
+            _logger.LogInformation("Created session {SessionId} \"{LobbyName}\"",
+                session.SessionId, lobbyName);
+            return session;
         }
 
         public MatchSession? GetSession(Guid sessionId)
         {
             return _sessions.TryGetValue(sessionId, out var session) ? session : null;
+        }
+
+        /// <summary>
+        /// Returns all sessions in Lobby state that still have room.
+        /// This is what the lobby list screen shows.
+        /// </summary>
+        public IReadOnlyList<MatchSession> GetOpenSessions()
+        {
+            return _sessions.Values
+                .Where(s => s.State == MatchState.Lobby && s.Players.Count < s.MaxPlayers)
+                .OrderByDescending(s => s.Players.Count) // Fuller lobbies first
+                .ToList()
+                .AsReadOnly();
         }
 
         public IReadOnlyList<MatchSession> GetActiveSessions()
@@ -75,14 +66,22 @@ namespace KitchenOrchestrator.GameServer.Services
 
         public void AddPlayerToSession(Guid sessionId, ConnectedPlayer player)
         {
-            if (_sessions.TryGetValue(sessionId, out var session))
+            if (!_sessions.TryGetValue(sessionId, out var session)) return;
+
+            lock (session.Players)
             {
-                lock (session.Players)
+                if (session.Players.Count >= session.MaxPlayers)
                 {
-                    if (!session.Players.Any(p => p.PlayerId == player.PlayerId))
-                    {
-                        session.Players.Add(player);
-                    }
+                    _logger.LogWarning("Player {PlayerId} tried to join full session {SessionId}",
+                        player.PlayerId, sessionId);
+                    return;
+                }
+
+                if (!session.Players.Any(p => p.PlayerId == player.PlayerId))
+                {
+                    session.Players.Add(player);
+                    _logger.LogInformation("Player {PlayerId} joined session {SessionId} ({Count}/{Max})",
+                        player.PlayerId, sessionId, session.Players.Count, session.MaxPlayers);
                 }
             }
         }
@@ -94,16 +93,31 @@ namespace KitchenOrchestrator.GameServer.Services
                 lock (session.Players)
                 {
                     var player = session.Players.FirstOrDefault(p => p.ConnectionId == connectionId);
-                    if (player != null)
-                    {
-                        session.Players.Remove(player);
-                        _logger.LogInformation("Player {PlayerId} removed from Session {SessionId}",
-                            player.PlayerId, session.SessionId);
+                    if (player == null) continue;
 
-                        // NOTE: Lobby cleanup removed - was deleting sessions too aggressively
-                        // during reconnect flows. Will re-add with proper grace period later.
-                        break;
+                    session.Players.Remove(player);
+                    _logger.LogInformation("Player {PlayerId} removed from session {SessionId}",
+                        player.PlayerId, session.SessionId);
+
+                    // If the host left, assign the next player as host
+                    if (connectionId == session.HostConnectionId && session.Players.Count > 0)
+                    {
+                        // Access HostConnectionId via SetHost — but SetHost only sets if empty.
+                        // We need to force-reassign here. This is a valid reason to expose
+                        // a ReassignHost method rather than hacking around SetHost's guard.
+                        session.ReassignHost(session.Players[0].ConnectionId);
+                        _logger.LogInformation("Host left session {SessionId}. New host: {ConnectionId}",
+                            session.SessionId, session.Players[0].ConnectionId);
                     }
+
+                    // Clean up empty sessions so the lobby list stays tidy
+                    if (session.Players.Count == 0 && session.State == MatchState.Lobby)
+                    {
+                        _sessions.TryRemove(session.SessionId, out _);
+                        _logger.LogInformation("Empty session {SessionId} removed.", session.SessionId);
+                    }
+
+                    break;
                 }
             }
         }
