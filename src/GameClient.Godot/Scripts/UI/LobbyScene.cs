@@ -14,6 +14,7 @@ public partial class LobbyScene : Control
 
     private bool _isHost = false;
     private LobbyStateDto? _latestLobbyState;
+    private string? _errorToShow;
 
     public override void _Ready()
     {
@@ -28,10 +29,11 @@ public partial class LobbyScene : Control
         _statusLabel.Text = "Connected to Server";
 
         _mapOptionButton.Clear();
-        _mapOptionButton.AddItem("TEST (5s)", 0);
-        _mapOptionButton.AddItem("Salad Bar", 1);
-        _mapOptionButton.AddItem("Sushi Bar", 2);
-        _mapOptionButton.AddItem("Burger Diner", 3);
+        _mapOptionButton.AddItem("— Select Map —", 0);
+        _mapOptionButton.AddItem("TEST (5s)", 1);
+        _mapOptionButton.AddItem("Salad Bar", 2);
+        _mapOptionButton.AddItem("Sushi Bar", 3);
+        _mapOptionButton.AddItem("Burger Diner", 4);
 
         _readyButton.Pressed += OnReadyPressed;
         _leaveButton.Pressed += OnLeavePressed;
@@ -39,11 +41,10 @@ public partial class LobbyScene : Control
 
         Bootstrap.Connection.OnLobbyStateUpdated += OnLobbyStateUpdated;
         Bootstrap.Connection.OnMatchStarted += OnMatchStarted;
+        Bootstrap.Connection.OnError += OnServerError;
 
         if (Bootstrap.State.CurrentSessionId.HasValue)
-        {
             _readyButton.Disabled = false;
-        }
     }
 
     private async void OnReadyPressed()
@@ -84,16 +85,15 @@ public partial class LobbyScene : Control
 
     private async void OnMapChanged(long index)
     {
-        // Index 0 is the "— Select Map —" placeholder, ignore it
         if (index == 0) return;
         if (!_isHost || !Bootstrap.State.CurrentSessionId.HasValue) return;
 
         string levelId = index switch
         {
-            0 => "map0",
-            1 => "map1",
-            2 => "map2",
-            3 => "map3",
+            1 => "map0",
+            2 => "map1",
+            3 => "map2",
+            4 => "map3",
             _ => "map0"
         };
 
@@ -118,7 +118,6 @@ public partial class LobbyScene : Control
     {
         if (_errorToShow == null) return;
         _statusLabel.Text = $"Error: {_errorToShow}";
-        // Re-enable ready button so player can try again
         _readyButton.Disabled = false;
         GD.PrintErr($"Server error: {_errorToShow}");
         _errorToShow = null;
@@ -142,19 +141,17 @@ public partial class LobbyScene : Control
 
         int mapIndex = lobbyState.LevelId switch
         {
-            "map0" => 0,
-            "map1" => 1,
-            "map2" => 2,
-            "map3" => 3,
+            "map0" => 1,
+            "map1" => 2,
+            "map2" => 3,
+            "map3" => 4,
             _ => 0
         };
 
         if (_mapOptionButton.Selected != mapIndex)
-        {
-            // No map selected yet — show placeholder
-            if (_mapOptionButton.Selected != 0)
-                _mapOptionButton.Select(0);
-        }
+            _mapOptionButton.Select(mapIndex);
+
+        _readyButton.Disabled = lobbyState.LevelId == null;
 
         foreach (Node child in _playerListContainer.GetChildren())
             child.QueueFree();

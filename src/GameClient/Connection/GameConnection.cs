@@ -15,6 +15,7 @@ namespace KitchenOrchestrator.GameClient.Connection
         public event Action<LobbyStateDto>? OnLobbyStateUpdated;
         public event Action<MatchStateDto>? OnMatchStateUpdated;
         public event Action<DeliveryResult>? OnDeliveryResult;
+        public event Action<string>? OnError;
 
         public GameConnection(GameClientOptions options, ClientState state)
         {
@@ -64,6 +65,11 @@ namespace KitchenOrchestrator.GameClient.Connection
                 _connection.On<DeliveryResult>("DeliveryResult", (result) =>
                 {
                     OnDeliveryResult?.Invoke(result);
+                });
+
+                _connection.On<string>("Error", (message) =>
+                {
+                    OnError?.Invoke(message);
                 });
 
                 await _connection.StartAsync();
