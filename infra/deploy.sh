@@ -65,9 +65,9 @@ echo "[2/5] Cloning/updating repository..."
 ssh -i "$SSH_KEY" "$OCI_HOST" bash << REMOTE
     if [ ! -d "$APP_DIR" ]; then
         git clone $REPO_URL $APP_DIR
-        cd $APP_DIR && git checkout feature/game-client
+        cd $APP_DIR && git checkout feature/station-interactions
     else
-        cd $APP_DIR && git pull origin feature/game-client
+        cd $APP_DIR && git pull origin feature/station-interactions
     fi
 REMOTE
 
