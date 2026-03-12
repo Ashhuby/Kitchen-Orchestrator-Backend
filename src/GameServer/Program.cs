@@ -23,6 +23,7 @@ builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>()
 
 // HttpClient-managed outbound pipeline for match result submission
 builder.Services.AddHttpClient<IMatchResultSubmissionService, MatchResultSubmissionService>();
+builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>();
 
 // Background tick loop � IHubContext<GameHub> is injected automatically
 builder.Services.AddHostedService<GameLoopService>();
