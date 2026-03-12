@@ -3,7 +3,6 @@ using KitchenOrchestrator.GameServer.Services;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 using KitchenOrchestrator.Shared.Contracts.Enums;
 using KitchenOrchestrator.Shared.GameLogic.Recipes;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -13,20 +12,22 @@ namespace KitchenOrchestrator.GameServer.Hubs
     {
         private readonly IJwtValidationService _jwtValidation;
         private readonly IMatchSessionService _sessionService;
-        private readonly IMatchSimulationService _matchSimulation;
+        private readonly IMatchSimulationService _simulationService;
         private readonly ILogger<GameHub> _logger;
 
         public GameHub(
             IJwtValidationService jwtValidation,
             IMatchSessionService sessionService,
-            IMatchSimulationService matchSimulation,
+            IMatchSimulationService simulationService,
             ILogger<GameHub> logger)
         {
             _jwtValidation = jwtValidation;
             _sessionService = sessionService;
-            _matchSimulation = matchSimulation;
+            _simulationService = simulationService;
             _logger = logger;
         }
+
+        // ── Connection ────────────────────────────────────────────────────────
 
         public override async Task OnConnectedAsync()
         {
@@ -35,16 +36,15 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
             if (string.IsNullOrEmpty(token))
             {
-                _logger.LogWarning("Connection attempt without a token. Aborting {ConnectionId}", Context.ConnectionId);
+                _logger.LogWarning("Connection attempt without token. Aborting {ConnectionId}", Context.ConnectionId);
                 Context.Abort();
                 return;
             }
 
             var claims = _jwtValidation.Validate(token);
-
             if (claims == null)
             {
-                _logger.LogWarning("Invalid JWT provided for {ConnectionId}", Context.ConnectionId);
+                _logger.LogWarning("Invalid JWT for {ConnectionId}", Context.ConnectionId);
                 Context.Abort();
                 return;
             }
@@ -63,46 +63,123 @@ namespace KitchenOrchestrator.GameServer.Hubs
             await base.OnDisconnectedAsync(exception);
         }
 
-        public async Task JoinMatch(string levelId)
-        {
-            var playerId = (Guid)Context.Items["PlayerId"]!;
-            var steamId = (string)Context.Items["SteamId"]!;
-            var displayName = (string)Context.Items["DisplayName"]!;
+        // ── Lobby List ────────────────────────────────────────────────────────
 
+        public Task<IReadOnlyList<LobbyInfoDto>> GetLobbies()
+        {
+            var open = _sessionService.GetOpenSessions();
+            var dtos = open.Select(s => new LobbyInfoDto(
+                s.SessionId,
+                s.LobbyName,
+                s.Players.FirstOrDefault(p => p.ConnectionId == s.HostConnectionId)?.DisplayName ?? "Unknown",
+                s.Players.Count,
+                s.MaxPlayers,
+                s.LevelId
+            )).ToList().AsReadOnly();
+
+            return Task.FromResult<IReadOnlyList<LobbyInfoDto>>(dtos);
+        }
+
+        public async Task<LobbyCreatedDto> CreateLobby(string lobbyName)
+        {
+            var playerId = GetPlayerId();
+            var steamId = GetSteamId();
+            var displayName = GetDisplayName();
+
+            if (string.IsNullOrWhiteSpace(lobbyName))
+                lobbyName = $"{displayName}'s Lobby";
+
+            var session = _sessionService.CreateSession(lobbyName);
             var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
 
-            var session = _sessionService.GetOrCreateSession(levelId);
             session.SetHost(Context.ConnectionId);
             _sessionService.AddPlayerToSession(session.SessionId, player);
 
             await Groups.AddToGroupAsync(Context.ConnectionId, session.SessionId.ToString());
-            await Clients.Caller.SendAsync("JoinedMatch", session.SessionId);
-            await Clients.Group(session.SessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+
+            _logger.LogInformation("Player {PlayerId} created lobby {SessionId} \"{LobbyName}\"",
+                playerId, session.SessionId, lobbyName);
+
+            return new LobbyCreatedDto(session.SessionId);
         }
+
+        public async Task<Guid?> JoinLobby(Guid sessionId)
+        {
+            var session = _sessionService.GetSession(sessionId);
+            if (session == null)
+            {
+                await Clients.Caller.SendAsync("Error", "Lobby not found.");
+                return null;
+            }
+
+            if (session.State != MatchState.Lobby)
+            {
+                await Clients.Caller.SendAsync("Error", "That match has already started.");
+                return null;
+            }
+
+            if (session.Players.Count >= session.MaxPlayers)
+            {
+                await Clients.Caller.SendAsync("Error", "Lobby is full.");
+                return null;
+            }
+
+            var playerId = GetPlayerId();
+            var player = new ConnectedPlayer(
+                Context.ConnectionId, playerId, GetSteamId(), GetDisplayName());
+
+            _sessionService.AddPlayerToSession(sessionId, player);
+            await Groups.AddToGroupAsync(Context.ConnectionId, sessionId.ToString());
+
+            await Clients.Group(sessionId.ToString())
+                .SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+
+            return sessionId;
+        }
+
+        // ── In-Lobby ──────────────────────────────────────────────────────────
 
         public async Task ChangeMap(Guid sessionId, string levelId)
         {
             var session = _sessionService.GetSession(sessionId);
             if (session == null) return;
 
-            session.SetLevel(levelId, Context.ConnectionId);
-            await Clients.Group(sessionId.ToString()).SendAsync("LobbyStateUpdated", BuildLobbyState(session));
+            bool changed = session.SetLevel(levelId, Context.ConnectionId);
+            if (!changed)
+            {
+                await Clients.Caller.SendAsync("Error", "Map change rejected — not host, invalid level, or match already started.");
+                return;
+            }
+
+            _logger.LogInformation("Session {SessionId} map changed to {LevelId} by host.", sessionId, levelId);
+            await Clients.Group(sessionId.ToString())
+                .SendAsync("LobbyStateUpdated", BuildLobbyState(session));
         }
 
         public async Task PlayerReady(Guid sessionId)
         {
+            _logger.LogInformation("PlayerReady called: session={SessionId} connection={ConnectionId}",
+                sessionId, Context.ConnectionId);
+
             var session = _sessionService.GetSession(sessionId);
-            if (session == null) return;
+            if (session == null)
+            {
+                _logger.LogWarning("PlayerReady: session {SessionId} not found.", sessionId);
+                return;
+            }
 
             var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
-            if (player == null) return;
-
-            player.IsReady = true;
+            if (player == null)
+            {
+                _logger.LogWarning("PlayerReady: player not found in session {SessionId}.", sessionId);
+                return;
+            }
 
             bool shouldStart = false;
 
             lock (session.Players)
             {
+                player.IsReady = true;
                 bool allReady = session.Players.All(p => p.IsReady);
                 if (allReady && session.Players.Count >= 2 && session.State == MatchState.Lobby)
                 {
@@ -120,15 +197,131 @@ namespace KitchenOrchestrator.GameServer.Hubs
             }
         }
 
-       public async Task DeliverDish(Guid sessionId, List<string> ingredientNames)
+        // ── In-Match ──────────────────────────────────────────────────────────
+
+        public Task UpdatePosition(PositionUpdateDto dto)
         {
-            var playerId = (Guid)Context.Items["PlayerId"]!;
-            var ingredients = ingredientNames
-                .Select(name => Enum.Parse<Ingredient>(name, ignoreCase: true))
-                .ToList();
-            var result = _matchSimulation.DeliverDish(sessionId, playerId, ingredients);
-            await Clients.Caller.SendAsync("DeliveryResult", result);
+            var session = _sessionService.GetSession(dto.SessionId);
+            if (session?.State != MatchState.Active) return Task.CompletedTask;
+
+            var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
+            if (player != null)
+            {
+                player.X = dto.X;
+                player.Y = dto.Y;
+            }
+            return Task.CompletedTask;
         }
+
+        public async Task RequestAction(StationActionRequest request)
+        {
+            var session = _sessionService.GetSession(request.SessionId);
+            if (session?.State != MatchState.Active) return;
+
+            var player = session.Players.FirstOrDefault(p => p.ConnectionId == Context.ConnectionId);
+            if (player == null) return;
+
+            switch (request.ActionType)
+            {
+                case StationActionType.Pickup:
+                    await HandlePickup(session, player, request.StationId);
+                    break;
+                case StationActionType.Deposit:
+                    await HandleDeposit(session, player, request.StationId);
+                    break;
+                case StationActionType.BeginPrep:
+                    await HandleBeginPrep(session, player, request.StationId);
+                    break;
+                case StationActionType.CancelPrep:
+                    await HandleCancelPrep(session, player, request.StationId);
+                    break;
+                case StationActionType.Collect:
+                    await HandleCollect(session, player, request.StationId);
+                    break;
+                case StationActionType.Deliver:
+                    await HandleDeliver(session, player, request.StationId);
+                    break;
+            }
+        }
+
+        // ── Station Handlers ──────────────────────────────────────────────────
+
+        private async Task HandlePickup(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (station.Type != StationType.IngredientSource) return;
+            if (player.HeldItem != null) return;
+
+            player.HeldItem = new HeldItem(station.SourceIngredient!.Value);
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleDeposit(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (player.HeldItem == null) return;
+            if (station.HeldItem != null) return;
+
+            station.HeldItem = player.HeldItem;
+            player.HeldItem = null;
+
+            if (station.Type == StationType.Stove)
+                station.BeginProcessing(10f);
+
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleBeginPrep(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (station.Type != StationType.ChoppingBoard) return;
+            if (station.HeldItem == null) return;
+            if (station.OccupyingPlayerId != null) return;
+
+            station.OccupyingPlayerId = player.PlayerId;
+            station.BeginProcessing(5f);
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleCancelPrep(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (station.OccupyingPlayerId != player.PlayerId) return;
+
+            station.ResetProgress();
+            station.OccupyingPlayerId = null;
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleCollect(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (!station.IsComplete) return;
+            if (player.HeldItem != null) return;
+
+            player.HeldItem = station.HeldItem;
+            station.HeldItem = null;
+            station.ResetProgress();
+            station.OccupyingPlayerId = null;
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleDeliver(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (station.Type != StationType.DeliveryCounter) return;
+            if (player.HeldItem == null) return;
+
+            var result = _simulationService.TryDeliver(session, player.PlayerId, new List<Ingredient> { player.HeldItem.Ingredient });
+
+            if (result.Success)
+                player.HeldItem = null;
+
+            await Clients.Caller.SendAsync("DeliveryResult", result);
+            await BroadcastMatchState(session);
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
 
         private LobbyStateDto BuildLobbyState(MatchSession session)
         {
@@ -141,5 +334,29 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
             return new LobbyStateDto(session.SessionId, session.LevelId, players);
         }
+
+        private async Task BroadcastMatchState(MatchSession session)
+        {
+            var state = new MatchStateDto(
+                session.SessionId,
+                session.Players.Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y)).ToList().AsReadOnly(),
+                session.Stations.Values.Select(s => new StationStateDto(
+                    s.StationId,
+                    s.Type.ToString(),
+                    s.HeldItem?.Ingredient.ToString(),
+                    s.HeldItem?.PrepState.ToString(),
+                    s.ProgressNormalized,
+                    s.OccupyingPlayerId != null
+                )).ToList().AsReadOnly(),
+                session.TimeRemainingSeconds,
+                session.TotalScore
+            );
+
+            await Clients.Group(session.SessionId.ToString()).SendAsync("MatchStateUpdated", state);
+        }
+
+        private Guid GetPlayerId() => (Guid)Context.Items["PlayerId"]!;
+        private string GetSteamId() => (string)Context.Items["SteamId"]!;
+        private string GetDisplayName() => (string)Context.Items["DisplayName"]!;
     }
 }

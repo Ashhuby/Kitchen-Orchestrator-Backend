@@ -22,11 +22,10 @@ text = "status"
 
 [node name="TimerLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "Timer"
+text = "Timer
+"
 
 [node name="ScoreLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "Score: 0"
 
-[node name="OrderListContainer" type="VBoxContainer" parent="VBoxContainer"]
-layout_mode = 2
+[node name="World" type="Node2D" parent="."]

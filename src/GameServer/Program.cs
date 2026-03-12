@@ -11,6 +11,7 @@ builder.Services.Configure<ServerAuthOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<GameServerOptions>(builder.Configuration.GetSection("GameServer"));
 
 // Core Services
+// AddSignalR automatically registers IHubContext<T> for all hubs � GameLoopService uses IHubContext<GameHub>
 builder.Services.AddSignalR();
 
 // Shared Security
@@ -20,18 +21,15 @@ builder.Services.AddSingleton<IJwtValidationService, JwtValidationService>();
 builder.Services.AddSingleton<IMatchSessionService, MatchSessionService>();
 builder.Services.AddSingleton<IMatchSimulationService, MatchSimulationService>();
 
-// Registered with HttpClient to manage the outgoing pipeline and connection pooling
+// HttpClient-managed outbound pipeline for match result submission
 builder.Services.AddHttpClient<IMatchResultSubmissionService, MatchResultSubmissionService>();
 
-// The Heartbeat (Background Service)
+// Background tick loop � IHubContext<GameHub> is injected automatically
 builder.Services.AddHostedService<GameLoopService>();
 
 var app = builder.Build();
 
-// Endpoints
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
-
-// SignalR entry point
 app.MapHub<GameHub>("/gamehub");
 
 app.Run();

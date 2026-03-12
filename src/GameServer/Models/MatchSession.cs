@@ -6,33 +6,32 @@ namespace KitchenOrchestrator.GameServer.Models
     public class MatchSession
     {
         public Guid SessionId { get; }
-        public string LevelId { get; private set; }  // host can change in lobby
+        public string LobbyName { get; }
+        public int MaxPlayers { get; } = 4;
+
+        // Null until the host selects a map in the lobby.
+        // Start() will throw if this is still null when called.
+        public string? LevelId { get; private set; }
+        public LevelDefinition? LevelDefinition { get; private set; }
+
         public string HostConnectionId { get; private set; } = string.Empty;
         public MatchState State { get; set; }
         public DateTime StartedAtUtc { get; private set; }
         public float TimeRemainingSeconds { get; set; }
         public int TotalScore { get; set; }
-        public List<ConnectedPlayer> Players { get; }
-        public List<ActiveOrder> Orders { get; }
-        public int CompletedOrders { get; set; } = 0;
-        public int FailedOrders { get; set; } = 0;
-        public int PerfectOrders { get; set; } = 0;
-        public float TimeSinceLastOrderSpawn { get; set; } = 0f;
+        public List<ConnectedPlayer> Players { get; } = new();
+        public List<ActiveOrder> Orders { get; } = new();
+        public int CompletedOrders { get; set; }
+        public int FailedOrders { get; set; }
+        public int PerfectOrders { get; set; }
+        public float TimeSinceLastOrderSpawn { get; set; }
+        public Dictionary<string, StationState> Stations { get; } = new();
 
-        public MatchSession(LevelDefinition level)
+        public MatchSession(string lobbyName)
         {
             SessionId = Guid.NewGuid();
-            LevelId = level.LevelId; // Pulled directly from the definition
+            LobbyName = lobbyName;
             State = MatchState.Lobby;
-            TimeRemainingSeconds = level.DurationSeconds;
-            Players = new List<ConnectedPlayer>();
-            Orders = new List<ActiveOrder>();
-        }
-
-        public void Start()
-        {
-            State = MatchState.Active;
-            StartedAtUtc = DateTime.UtcNow;
         }
 
         public void SetHost(string connectionId)
@@ -41,10 +40,46 @@ namespace KitchenOrchestrator.GameServer.Models
                 HostConnectionId = connectionId;
         }
 
-        public void SetLevel(string levelId, string requestingConnectionId)
+        /// <summary>
+        /// Force-reassigns the host. Used when the current host disconnects.
+        /// Only callable from MatchSessionService — not exposed to the hub.
+        /// </summary>
+        internal void ReassignHost(string connectionId)
         {
-            if (requestingConnectionId == HostConnectionId && State == MatchState.Lobby)
-                LevelId = levelId;
+            HostConnectionId = connectionId;
+        }
+
+        /// <summary>
+        /// Sets the level. Only the host can call this and only while in Lobby state.
+        /// Returns false if the requestor is not the host, the level doesn't exist,
+        /// or the session is no longer in Lobby state.
+        /// </summary>
+        public bool SetLevel(string levelId, string requestingConnectionId)
+        {
+            if (requestingConnectionId != HostConnectionId) return false;
+            if (State != MatchState.Lobby) return false;
+
+            var levelDef = LevelRegistry.GetById(levelId);
+            if (levelDef == null) return false;
+
+            LevelId = levelDef.LevelId;
+            LevelDefinition = levelDef;
+            TimeRemainingSeconds = levelDef.DurationSeconds;
+            return true;
+        }
+
+        /// <summary>
+        /// Transitions to Active. Throws if no level has been set — the hub must
+        /// validate this before calling Start().
+        /// </summary>
+        public void Start()
+        {
+            if (LevelDefinition == null)
+                throw new InvalidOperationException(
+                    $"Cannot start session {SessionId} — no level has been selected.");
+
+            State = MatchState.Active;
+            StartedAtUtc = DateTime.UtcNow;
         }
     }
 }

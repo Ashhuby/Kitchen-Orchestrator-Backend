@@ -9,28 +9,20 @@ namespace KitchenOrchestrator.GameServer.Services
 {
     public interface IMatchSimulationService
     {
-        DeliveryResult DeliverDish(Guid sessionId, Guid playerId, List<Ingredient> ingredients);
+        DeliveryResult TryDeliver(MatchSession session, Guid playerId, List<Ingredient> ingredients);
     }
 
     public class MatchSimulationService : IMatchSimulationService
     {
-        private readonly IMatchSessionService _sessionService;
         private readonly ILogger<MatchSimulationService> _logger;
 
-        public MatchSimulationService(
-            IMatchSessionService sessionService,
-            ILogger<MatchSimulationService> logger)
+        public MatchSimulationService(ILogger<MatchSimulationService> logger)
         {
-            _sessionService = sessionService;
             _logger = logger;
         }
 
-        public DeliveryResult DeliverDish(Guid sessionId, Guid playerId, List<Ingredient> ingredients)
+        public DeliveryResult TryDeliver(MatchSession session, Guid playerId, List<Ingredient> ingredients)
         {
-            var session = _sessionService.GetSession(sessionId);
-            if (session == null)
-                return new DeliveryResult(false, 0, false, "Session not found.");
-
             if (session.State != MatchState.Active)
                 return new DeliveryResult(false, 0, false, "Match is not active.");
 

@@ -1,82 +1,149 @@
 using Godot;
+using System;
+using System.Collections.Generic;
 using KitchenOrchestrator.GameClient.Godot;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 
 public partial class MatchScene : Control
 {
+    // ── Node References ───────────────────────────────────────────────────────
+
     private Label _statusLabel = null!;
     private Label _timerLabel = null!;
     private Label _scoreLabel = null!;
-    private VBoxContainer _orderListContainer = null!;
+    private Node2D _worldRoot = null!;
 
-    private MatchStateDto? _latestMatchState;
+    // ── Player Tracking ───────────────────────────────────────────────────────
+
+    private readonly Dictionary<Guid, Player> _spawnedPlayers = new();
+    private PackedScene _playerScene = null!;
+
+    // ── Latest State (set from SignalR thread, applied on main thread) ─────────
+
+    private MatchStateDto? _latestState;
+
+    // ── Spawn Positions ───────────────────────────────────────────────────────
+
+    private static readonly Vector2[] SpawnPositions = new[]
+    {
+        new Vector2(200f, 300f),
+        new Vector2(400f, 300f),
+        new Vector2(200f, 500f),
+        new Vector2(400f, 500f),
+    };
+
+    // ── Godot Lifecycle ───────────────────────────────────────────────────────
 
     public override void _Ready()
     {
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
-        _timerLabel = GetNode<Label>("VBoxContainer/TimerLabel");
-        _scoreLabel = GetNode<Label>("VBoxContainer/ScoreLabel");
-        _orderListContainer = GetNode<VBoxContainer>("VBoxContainer/OrderListContainer");
+        _timerLabel  = GetNode<Label>("VBoxContainer/TimerLabel");
+        _scoreLabel  = GetNode<Label>("VBoxContainer/ScoreLabel");
+        _worldRoot   = GetNode<Node2D>("World");
+
+        _playerScene = GD.Load<PackedScene>("res://Scenes/Player.tscn");
 
         _statusLabel.Text = "Match in progress...";
-        _timerLabel.Text = "";
-        _scoreLabel.Text = "Score: 0";
+        _timerLabel.Text  = "";
+        _scoreLabel.Text  = "Score: 0";
 
         Bootstrap.Connection.OnMatchStateUpdated += OnMatchStateUpdated;
-    }
-
-    private void OnMatchStateUpdated(MatchStateDto matchState)
-    {
-        _latestMatchState = matchState;
-        CallDeferred(nameof(ApplyMatchState));
-    }
-
-    private void ApplyMatchState()
-    {
-        if (_latestMatchState == null) return;
-        var state = _latestMatchState;
-
-        // Timer
-        int seconds = (int)state.TimeRemaining;
-        _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
-
-        // Score
-        _scoreLabel.Text = $"Score: {state.TotalScore}";
-
-        // Orders
-        foreach (Node child in _orderListContainer.GetChildren())
-            child.QueueFree();
-
-        foreach (var order in state.ActiveOrders)
-        {
-            var label = new Label();
-            label.Text = $"{order.RecipeName} — {(int)order.TimeRemaining}s — [{string.Join(", ", order.RequiredIngredients)}]";
-            _orderListContainer.AddChild(label);
-        }
-
-        // Player scores
-        foreach (var player in state.Players)
-        {
-            var label = new Label();
-            label.Text = $"{player.DisplayName}: {player.Score} pts ({player.OrdersDelivered} delivered)";
-            _orderListContainer.AddChild(label);
-        }
-
-        // Match over
-        if (state.State == "Completed" || state.State == "Abandoned")
-        {
-            CleanupSubscriptions();
-            _statusLabel.Text = $"Match Over! Final Score: {state.TotalScore}";
-        }
-    }
-
-    private void CleanupSubscriptions()
-    {
-        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
+        Bootstrap.Connection.OnError += OnServerError;
     }
 
     public override void _ExitTree()
     {
-        CleanupSubscriptions();
+        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
+        Bootstrap.Connection.OnError -= OnServerError;
+    }
+
+    // ── SignalR Callbacks (background thread) ─────────────────────────────────
+
+    private void OnMatchStateUpdated(MatchStateDto state)
+    {
+        _latestState = state;
+        CallDeferred(nameof(ApplyMatchState));
+    }
+
+    private void OnServerError(string error)
+    {
+        GD.PrintErr($"MatchScene server error: {error}");
+    }
+
+    // ── Main Thread: Apply State ───────────────────────────────────────────────
+
+    private void ApplyMatchState()
+    {
+        if (_latestState == null) return;
+        var state = _latestState;
+
+        UpdateHUD(state);
+        SyncPlayers(state);
+
+        if (state.TimeRemainingSeconds <= 0)
+        {
+            _statusLabel.Text = $"Match Over! Final Score: {state.TotalScore}";
+            Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
+        }
+    }
+
+    private void UpdateHUD(MatchStateDto state)
+    {
+        int seconds = (int)state.TimeRemainingSeconds;
+        _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
+        _scoreLabel.Text = $"Score: {state.TotalScore}";
+    }
+
+    private void SyncPlayers(MatchStateDto state)
+    {
+        var localPlayerId = Bootstrap.State.PlayerId;
+        int spawnIndex = 0;
+
+        foreach (var playerDto in state.Players)
+        {
+            if (_spawnedPlayers.TryGetValue(playerDto.PlayerId, out var existing))
+            {
+                if (!existing.IsLocalPlayer)
+                    existing.ApplySnapshot(playerDto.X, playerDto.Y);
+            }
+            else
+            {
+                var spawnPos = spawnIndex < SpawnPositions.Length
+                    ? SpawnPositions[spawnIndex]
+                    : new Vector2(300f + spawnIndex * 60f, 300f);
+
+                bool isLocal = playerDto.PlayerId == localPlayerId;
+                SpawnPlayer(playerDto.PlayerId, playerDto.DisplayName, isLocal, spawnPos);
+                spawnIndex++;
+            }
+        }
+
+        var arrived = new HashSet<Guid>();
+        foreach (var p in state.Players) arrived.Add(p.PlayerId);
+
+        foreach (var id in new List<Guid>(_spawnedPlayers.Keys))
+        {
+            if (!arrived.Contains(id))
+            {
+                _spawnedPlayers[id].QueueFree();
+                _spawnedPlayers.Remove(id);
+            }
+        }
+    }
+
+    private void SpawnPlayer(Guid playerId, string displayName, bool isLocal, Vector2 position)
+    {
+        if (_playerScene == null)
+        {
+            GD.PrintErr("MatchScene: _playerScene is null — Player.tscn failed to load.");
+            return;
+        }
+
+        var instance = _playerScene.Instantiate<Player>();
+        _worldRoot.AddChild(instance);
+        instance.Initialise(playerId, displayName, isLocal, position);
+        _spawnedPlayers[playerId] = instance;
+
+        GD.Print($"Spawned {(isLocal ? "(local)" : "(remote)")} player {displayName} at {position}");
     }
 }

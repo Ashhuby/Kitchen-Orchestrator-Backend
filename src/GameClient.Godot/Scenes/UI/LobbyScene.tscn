@@ -49,3 +49,7 @@ text = "Ready Up"
 [node name="LeaveButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Leave"
+
+[node name="ErrorLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+horizontal_alignment = 1

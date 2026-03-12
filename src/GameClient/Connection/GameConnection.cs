@@ -1,4 +1,4 @@
-using KitchenOrchestrator.GameClient.Configuration;
+﻿using KitchenOrchestrator.GameClient.Configuration;
 using KitchenOrchestrator.GameClient.Models;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -36,8 +36,10 @@ namespace KitchenOrchestrator.GameClient.Connection
                     .WithUrl($"{_options.GameServerHubUrl}?access_token={_state.Jwt}")
                     .Build();
 
-                _connection.On<Guid>("JoinedMatch", (sessionId) =>
+                // Lobby list
+                _connection.On<Guid>("JoinedLobby", (sessionId) =>
                 {
+                    // Kept for backwards compat but session ID now comes from InvokeAsync return value
                     _state.CurrentSessionId = sessionId;
                     _state.IsConnectedToMatch = true;
                     Console.WriteLine($"Joined match session: {sessionId}");
@@ -69,34 +71,63 @@ namespace KitchenOrchestrator.GameClient.Connection
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"SignalR Connection Error: {ex.Message}");
-                _state.IsConnectedToMatch = false;
+                Console.WriteLine($"SignalR connection error: {ex.Message}");
                 return false;
             }
         }
 
-        public async Task JoinMatchAsync(string levelId)
-        {
-            if (_connection == null || _connection.State != HubConnectionState.Connected)
-                throw new InvalidOperationException("Cannot join match: Not connected to server.");
+        // ── Lobby List ────────────────────────────────────────────────────────
 
-            await _connection.InvokeAsync("JoinMatch", levelId);
+        public async Task<IReadOnlyList<LobbyInfoDto>> GetLobbiesAsync()
+        {
+            EnsureConnected();
+            return await _connection!.InvokeAsync<IReadOnlyList<LobbyInfoDto>>("GetLobbies");
         }
+
+        public async Task<LobbyCreatedDto> CreateLobbyAsync(string lobbyName)
+        {
+            EnsureConnected();
+            return await _connection!.InvokeAsync<LobbyCreatedDto>("CreateLobby", lobbyName);
+        }
+
+        public async Task JoinLobbyAsync(Guid sessionId)
+        {
+            EnsureConnected();
+            var returnedSessionId = await _connection!.InvokeAsync<Guid?>("JoinLobby", sessionId);
+            if (returnedSessionId.HasValue)
+            {
+                _state.CurrentSessionId = returnedSessionId.Value;
+                _state.IsConnectedToMatch = true;
+            }
+        }
+
+        // ── In-Lobby ──────────────────────────────────────────────────────────
 
         public async Task ChangeMapAsync(Guid sessionId, string levelId)
         {
-            if (_connection == null || _connection.State != HubConnectionState.Connected)
-                throw new InvalidOperationException("Not connected to server.");
-
-            await _connection.InvokeAsync("ChangeMap", sessionId, levelId);
+            EnsureConnected();
+            await _connection!.InvokeAsync("ChangeMap", sessionId, levelId);
         }
 
         public async Task SendReadyAsync(Guid sessionId)
         {
-            if (_connection == null || _connection.State != HubConnectionState.Connected)
-                throw new InvalidOperationException("Cannot send ready status: Not connected to server.");
+            EnsureConnected();
+            await _connection!.InvokeAsync("PlayerReady", sessionId);
+        }
 
-            await _connection.InvokeAsync("PlayerReady", sessionId);
+        // ── In-Match ──────────────────────────────────────────────────────────
+
+        public void SendPositionAsync(PositionUpdateDto dto)
+        {
+            if (_connection?.State != HubConnectionState.Connected) return;
+            // Fire and forget — dropped frames are acceptable for movement
+            _ = _connection.InvokeAsync("UpdatePosition", dto);
+        }
+
+        public void SendActionAsync(StationActionRequest request)
+        {
+            if (_connection?.State != HubConnectionState.Connected) return;
+            _ = _connection.InvokeAsync("RequestAction", request);
         }
 
         public async Task DeliverDishAsync(Guid sessionId, List<string> ingredients)
@@ -118,6 +149,12 @@ namespace KitchenOrchestrator.GameClient.Connection
 
             _state.IsConnectedToMatch = false;
             _state.CurrentSessionId = null;
+        }
+
+        private void EnsureConnected()
+        {
+            if (_connection == null || _connection.State != HubConnectionState.Connected)
+                throw new InvalidOperationException("Not connected to server.");
         }
     }
 }

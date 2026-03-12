@@ -17,6 +17,10 @@ namespace KitchenOrchestrator.GameServer.Services
         private readonly IHubContext<GameHub> _hubContext;
         private readonly ILogger<GameLoopService> _logger;
 
+        private const int TickDelayMs = 100;
+        private const float DeltaTime = 0.1f;
+        private const float BurnGracePeriodSeconds = 5f;
+
         public GameLoopService(
             IMatchSessionService sessionService,
             IMatchResultSubmissionService submissionService,
@@ -33,39 +37,34 @@ namespace KitchenOrchestrator.GameServer.Services
         {
             _logger.LogInformation("Game Loop Service started.");
 
-            const int tickDelayMs = 100;
-            const float deltaTime = 0.1f;
-            int tickCount = 0;
-
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    TickAllSessions(deltaTime, tickCount);
+                    await TickAllSessionsAsync();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error occurred during Game Loop tick.");
                 }
 
-                tickCount++;
-                await Task.Delay(tickDelayMs, stoppingToken);
+                await Task.Delay(TickDelayMs, stoppingToken);
             }
         }
 
-        private void TickAllSessions(float deltaTime, int tickCount)
+        private async Task TickAllSessionsAsync()
         {
             var activeSessions = _sessionService.GetActiveSessions();
 
             foreach (var session in activeSessions)
             {
-                TickSession(session, deltaTime, tickCount);
+                await TickSessionAsync(session);
             }
         }
 
-        private void TickSession(MatchSession session, float deltaTime, int tickCount)
+        private async Task TickSessionAsync(MatchSession session)
         {
-            session.TimeRemainingSeconds -= deltaTime;
+            session.TimeRemainingSeconds -= DeltaTime;
 
             if (session.TimeRemainingSeconds <= 0)
             {
@@ -73,11 +72,12 @@ namespace KitchenOrchestrator.GameServer.Services
                 return;
             }
 
+            // --- Order timers ---
             lock (session.Orders)
             {
                 foreach (var order in session.Orders.Where(o => o.Status == OrderStatus.InProgress))
                 {
-                    order.Timer.Tick(deltaTime);
+                    order.Timer.Tick(DeltaTime);
 
                     if (order.Timer.IsExpired)
                     {
@@ -87,10 +87,11 @@ namespace KitchenOrchestrator.GameServer.Services
                 }
             }
 
-            var levelDef = LevelRegistry.GetById(session.LevelId);
+            // --- Order spawning ---
+            var levelDef = session.LevelDefinition;
             if (levelDef != null)
             {
-                session.TimeSinceLastOrderSpawn += deltaTime;
+                session.TimeSinceLastOrderSpawn += DeltaTime;
 
                 if (session.TimeSinceLastOrderSpawn >= levelDef.OrderSpawnIntervalSeconds &&
                     session.Orders.Count(o => o.Status == OrderStatus.InProgress) < levelDef.MaxSimultaneousOrders)
@@ -108,24 +109,98 @@ namespace KitchenOrchestrator.GameServer.Services
                 }
             }
 
-            // Broadcast every 3rd tick (~3Hz)
-            if (tickCount % 3 == 0)
+            // --- Station ticking ---
+            TickStations(session);
+
+            await BroadcastMatchStateAsync(session);
+        }
+
+        private void TickStations(MatchSession session)
+        {
+            foreach (var station in session.Stations.Values)
             {
-                var matchState = BuildMatchState(session);
-                _ = _hubContext.Clients.Group(session.SessionId.ToString())
-                    .SendAsync("MatchStateUpdated", matchState);
+                if (station.HeldItem == null) continue;
+
+                switch (station.Type)
+                {
+                    case StationType.ChoppingBoard:
+                        if (!station.OccupyingPlayerId.HasValue) continue;
+                        if (!station.IsComplete)
+                        {
+                            station.ProgressSeconds += DeltaTime;
+                            if (station.IsComplete)
+                            {
+                                station.HeldItem.PrepState = ItemPrepState.Chopped;
+                                station.OccupyingPlayerId = null;
+                                _logger.LogDebug("Station {Id}: chopping complete.", station.StationId);
+                            }
+                        }
+                        break;
+
+                    case StationType.Stove:
+                        if (station.DurationSeconds <= 0) continue;
+                        if (!station.IsComplete)
+                        {
+                            station.ProgressSeconds += DeltaTime;
+                            if (station.IsComplete)
+                            {
+                                station.HeldItem.PrepState = ItemPrepState.Cooked;
+                                _logger.LogDebug("Station {Id}: cooking complete. Burn timer started.", station.StationId);
+                            }
+                        }
+                        else if (station.HeldItem.PrepState == ItemPrepState.Cooked)
+                        {
+                            station.ProgressSeconds += DeltaTime;
+                            float burnThreshold = station.DurationSeconds + BurnGracePeriodSeconds;
+                            if (station.ProgressSeconds >= burnThreshold)
+                            {
+                                station.HeldItem.PrepState = ItemPrepState.Burned;
+                                _logger.LogInformation("Station {Id}: item burned!", station.StationId);
+                            }
+                        }
+                        break;
+                }
             }
+        }
+
+        private async Task BroadcastMatchStateAsync(MatchSession session)
+        {
+            List<PlayerPositionDto> playerPositions;
+            lock (session.Players)
+            {
+                playerPositions = session.Players
+                    .Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y))
+                    .ToList();
+            }
+
+            var stationStates = session.Stations.Values
+                .Select(s => new StationStateDto(
+                    s.StationId,
+                    s.Type.ToString(),
+                    s.HeldItem?.Ingredient.ToString(),
+                    s.HeldItem?.PrepState.ToString(),
+                    s.ProgressNormalized,
+                    s.OccupyingPlayerId.HasValue
+                ))
+                .ToList();
+
+            var matchState = new MatchStateDto(
+                session.SessionId,
+                playerPositions.AsReadOnly(),
+                stationStates.AsReadOnly(),
+                session.TimeRemainingSeconds,
+                session.TotalScore
+            );
+
+            await _hubContext.Clients
+                .Group(session.SessionId.ToString())
+                .SendAsync("MatchStateUpdated", matchState);
         }
 
         private void EndMatch(MatchSession session)
         {
             session.State = MatchState.Completed;
-
             _logger.LogInformation("Match {SessionId} ended. Submitting results...", session.SessionId);
-
-            var finalState = BuildMatchState(session);
-            _ = _hubContext.Clients.Group(session.SessionId.ToString())
-                .SendAsync("MatchStateUpdated", finalState);
 
             _ = Task.Run(async () =>
             {
@@ -138,36 +213,6 @@ namespace KitchenOrchestrator.GameServer.Services
                     _logger.LogError(ex, "Failed to submit results for session {SessionId}", session.SessionId);
                 }
             });
-        }
-
-        private MatchStateDto BuildMatchState(MatchSession session)
-        {
-            List<ActiveOrderDto> activeOrders;
-            lock (session.Orders)
-            {
-                activeOrders = session.Orders
-                    .Where(o => o.Status == OrderStatus.InProgress)
-                    .Select(o => new ActiveOrderDto(
-                        o.OrderId,
-                        o.Recipe.Name,
-                        o.Recipe.RequiredIngredients.Select(i => i.ToString()).ToList().AsReadOnly(),
-                        o.Timer.TimeRemaining,
-                        o.Timer.TotalDuration))
-                    .ToList();
-            }
-
-            var players = session.Players
-                .Select(p => new MatchPlayerDto(p.PlayerId, p.DisplayName, p.Score, p.OrdersDelivered))
-                .ToList();
-
-            return new MatchStateDto(
-                session.SessionId,
-                session.State.ToString(),
-                session.TimeRemainingSeconds,
-                session.TotalScore,
-                activeOrders.AsReadOnly(),
-                players.AsReadOnly()
-            );
         }
     }
 }
