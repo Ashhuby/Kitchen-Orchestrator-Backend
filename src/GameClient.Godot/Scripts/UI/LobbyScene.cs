@@ -90,11 +90,11 @@ public partial class LobbyScene : Control
 
         string levelId = index switch
         {
-            1 => "map0",
-            2 => "map1",
-            3 => "map2",
-            4 => "map3",
-            _ => "map0"
+            1 => "Map0",
+            2 => "Map1",
+            3 => "Map2",
+            4 => "Map3",
+            _ => "Map0"
         };
 
         try
@@ -126,6 +126,10 @@ public partial class LobbyScene : Control
     private void OnLobbyStateUpdated(LobbyStateDto lobbyState)
     {
         _latestLobbyState = lobbyState;
+
+        // Keep Bootstrap.State.LevelId current so MatchScene can load the correct map
+        Bootstrap.State.LevelId = lobbyState.LevelId;
+
         CallDeferred(nameof(UpdateUIFromLobbyState));
     }
 
@@ -141,10 +145,10 @@ public partial class LobbyScene : Control
 
         int mapIndex = lobbyState.LevelId switch
         {
-            "map0" => 1,
-            "map1" => 2,
-            "map2" => 3,
-            "map3" => 4,
+            "Map0" => 1,
+            "Map1" => 2,
+            "Map2" => 3,
+            "Map3" => 4,
             _ => 0
         };
 

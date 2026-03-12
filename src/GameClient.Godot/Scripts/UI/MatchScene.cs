@@ -2,56 +2,119 @@ using Godot;
 using KitchenOrchestrator.GameClient.Godot;
 using KitchenOrchestrator.Shared.Contracts.DTOs;
 using System;
-using System.Collections.Generic; 
+using System.Collections.Generic;
 using System.Linq;
 
 /// <summary>
 /// Root scene for an active match.
-/// Owns the player dictionary and the station dictionary.
-/// Receives MatchStateUpdated broadcasts and fans them out to Player and Station nodes.
+/// Dynamically loads the correct map scene based on LevelId stored in Bootstrap.State.
+/// The map scene is expected to contain a Node2D named "StationContainer" and
+/// a Node2D named "PlayerContainer". These are adopted by MatchScene at load time.
 /// </summary>
 public partial class MatchScene : Control
 {
-    // ── Child nodes ───────────────────────────────────────────────────────────
+    // ── Child nodes (always present in MatchScene.tscn) ───────────────────────
     private Label _timerLabel = null!;
     private Label _scoreLabel = null!;
+
+    // ── Set after map is loaded ───────────────────────────────────────────────
     private Node2D _playerContainer = null!;
     private Node2D _stationContainer = null!;
 
     // ── Runtime state ─────────────────────────────────────────────────────────
     private readonly Dictionary<Guid, Player> _players = new();
-
-    // StationId → Station node — populated from scene tree on _Ready
     private readonly Dictionary<string, Station> _stations = new();
-
     private MatchStateDto? _pendingState;
 
-    // Packed scene for remote players (local player is instantiated separately)
     [Export] public PackedScene? PlayerScene { get; set; }
+
+    // Maps LevelId string → Godot scene path
+    private static readonly Dictionary<string, string> LevelScenePaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "Map0", "res://Scenes/Maps/Map0.tscn" },
+        { "Map1", "res://Scenes/Maps/Map1.tscn" },
+        { "Map2", "res://Scenes/Maps/Map2.tscn" },
+        { "Map3", "res://Scenes/Maps/Map3.tscn" },
+    };
 
     public override void _Ready()
     {
         _timerLabel = GetNode<Label>("HUD/TimerLabel");
         _scoreLabel = GetNode<Label>("HUD/ScoreLabel");
-        _playerContainer = GetNode<Node2D>("PlayerContainer");
-        _stationContainer = GetNode<Node2D>("StationContainer");
 
-        // Build station lookup from whatever is placed in the scene
+        if (!LoadMap())
+        {
+            GD.PrintErr("MatchScene: Failed to load map. Aborting match setup.");
+            return;
+        }
+
+        SpawnLocalPlayer();
+
+        Bootstrap.Connection.OnMatchStateUpdated += OnMatchStateUpdated;
+
+        if (Bootstrap.State.CurrentSessionId.HasValue)
+            CallDeferred(nameof(ReportStationLayout));
+    }
+
+    // ── Map Loading ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads the map scene for the current LevelId, instances it, and extracts
+    /// StationContainer and PlayerContainer from it.
+    /// Returns false if the level is unknown or the scene is missing required nodes.
+    /// </summary>
+    private bool LoadMap()
+    {
+        string? levelId = Bootstrap.State.LevelId;
+
+        if (string.IsNullOrEmpty(levelId))
+        {
+            GD.PrintErr("MatchScene: Bootstrap.State.LevelId is null — cannot load map.");
+            return false;
+        }
+
+        if (!LevelScenePaths.TryGetValue(levelId, out var scenePath))
+        {
+            GD.PrintErr($"MatchScene: No scene path registered for LevelId '{levelId}'.");
+            return false;
+        }
+
+        var packed = GD.Load<PackedScene>(scenePath);
+        if (packed == null)
+        {
+            GD.PrintErr($"MatchScene: Failed to load scene at '{scenePath}'.");
+            return false;
+        }
+
+        var mapInstance = packed.Instantiate<Node2D>();
+        AddChild(mapInstance);
+        // Move map behind HUD layer
+        MoveChild(mapInstance, 0);
+
+        _playerContainer = mapInstance.GetNodeOrNull<Node2D>("PlayerContainer")
+            ?? CreateFallbackContainer(mapInstance, "PlayerContainer");
+
+        _stationContainer = mapInstance.GetNodeOrNull<Node2D>("StationContainer")
+            ?? CreateFallbackContainer(mapInstance, "StationContainer");
+
+        // Build station lookup
         foreach (Node child in _stationContainer.GetChildren())
         {
             if (child is Station station && !string.IsNullOrEmpty(station.StationId))
                 _stations[station.StationId] = station;
         }
 
-        // Spawn local player at spawn point
-        SpawnLocalPlayer();
+        GD.Print($"MatchScene: Loaded map '{levelId}' with {_stations.Count} stations.");
+        return true;
+    }
 
-        // Subscribe to server events
-        Bootstrap.Connection.OnMatchStateUpdated += OnMatchStateUpdated;
-
-        // Report station layout to server (host only — server ignores duplicates)
-        if (Bootstrap.State.CurrentSessionId.HasValue)
-            CallDeferred(nameof(ReportStationLayout));
+    private Node2D CreateFallbackContainer(Node parent, string name)
+    {
+        GD.PrintErr($"MatchScene: Map scene missing '{name}' node — creating empty fallback.");
+        var node = new Node2D();
+        node.Name = name;
+        parent.AddChild(node);
+        return node;
     }
 
     // ── Station Layout Report ─────────────────────────────────────────────────
@@ -90,12 +153,10 @@ public partial class MatchScene : Control
         if (_pendingState == null) return;
         var state = _pendingState;
 
-        // HUD
         int seconds = (int)state.TimeRemaining;
         _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
         _scoreLabel.Text = $"Score: {state.TotalScore}";
 
-        // Players
         foreach (var dto in state.Players)
         {
             if (!_players.TryGetValue(dto.PlayerId, out var playerNode))
@@ -108,14 +169,12 @@ public partial class MatchScene : Control
                 playerNode.ApplySnapshot(dto.X, dto.Y);
         }
 
-        // Stations
         foreach (var dto in state.Stations)
         {
             if (_stations.TryGetValue(dto.StationId, out var stationNode))
                 stationNode.ApplyState(dto);
         }
 
-        // Match end
         if (state.State == "Completed" || state.State == "Abandoned")
             HandleMatchEnd(state);
     }

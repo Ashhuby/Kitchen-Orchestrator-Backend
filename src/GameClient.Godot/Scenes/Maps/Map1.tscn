@@ -1,0 +1,42 @@
+[gd_scene load_steps=2 format=3 uid="uid://ciqipu8ylsmdv"]
+
+[ext_resource type="PackedScene" uid="uid://df0qooe2iw6t" path="res://Scenes/Station.tscn" id="1_l2loa"]
+
+[node name="Map1" type="Node2D"]
+
+[node name="background" type="ColorRect" parent="."]
+offset_right = 1153.0
+offset_bottom = 646.0
+size_flags_horizontal = 4
+size_flags_vertical = 4
+color = Color(0.290196, 0.317647, 0.4, 1)
+
+[node name="PlayerContainer" type="Node2D" parent="."]
+
+[node name="StationContainer" type="Node2D" parent="."]
+
+[node name="Station" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(951, 127)
+StationId = "source_lettuce"
+StationType = 0
+SourceIngredient = "Lettuce"
+
+[node name="Station2" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(960, 443)
+StationId = "source_tomato"
+StationType = 0
+SourceIngredient = "Tomato"
+
+[node name="Station3" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(693, 516)
+StationId = "chop_0"
+StationType = 1
+
+[node name="Station4" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(223, 520)
+StationId = "counter_0"
+
+[node name="Station5" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(452, 108)
+StationId = "delivery"
+StationType = 3
