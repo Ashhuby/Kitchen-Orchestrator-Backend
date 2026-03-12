@@ -7,11 +7,11 @@ using System.Linq;
 
 /// <summary>
 /// Root scene for an active match.
-/// Dynamically loads the correct map scene based on LevelId stored in Bootstrap.State.
-/// The map scene is expected to contain a Node2D named "StationContainer" and
-/// a Node2D named "PlayerContainer". These are adopted by MatchScene at load time.
+/// Inherits Node2D — NOT Control — so it does not consume keyboard input
+/// before Station nodes get a chance to handle it via _UnhandledKeyInput.
+/// HUD elements live on a CanvasLayer child and are unaffected by this change.
 /// </summary>
-public partial class MatchScene : Control
+public partial class MatchScene : Node2D
 {
     // ── Child nodes (always present in MatchScene.tscn) ───────────────────────
     private Label _timerLabel = null!;
@@ -28,7 +28,6 @@ public partial class MatchScene : Control
 
     [Export] public PackedScene? PlayerScene { get; set; }
 
-    // Maps LevelId string → Godot scene path
     private static readonly Dictionary<string, string> LevelScenePaths = new(StringComparer.OrdinalIgnoreCase)
     {
         { "Map0", "res://Scenes/Maps/Map0.tscn" },
@@ -58,11 +57,6 @@ public partial class MatchScene : Control
 
     // ── Map Loading ───────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Loads the map scene for the current LevelId, instances it, and extracts
-    /// StationContainer and PlayerContainer from it.
-    /// Returns false if the level is unknown or the scene is missing required nodes.
-    /// </summary>
     private bool LoadMap()
     {
         string? levelId = Bootstrap.State.LevelId;
@@ -88,16 +82,14 @@ public partial class MatchScene : Control
 
         var mapInstance = packed.Instantiate<Node2D>();
         AddChild(mapInstance);
-        // Move map behind HUD layer
         MoveChild(mapInstance, 0);
 
-        _playerContainer = mapInstance.GetNodeOrNull<Node2D>("PlayerContainer")
+        _playerContainer  = mapInstance.GetNodeOrNull<Node2D>("PlayerContainer")
             ?? CreateFallbackContainer(mapInstance, "PlayerContainer");
 
         _stationContainer = mapInstance.GetNodeOrNull<Node2D>("StationContainer")
             ?? CreateFallbackContainer(mapInstance, "StationContainer");
 
-        // Build station lookup
         foreach (Node child in _stationContainer.GetChildren())
         {
             if (child is Station station && !string.IsNullOrEmpty(station.StationId))

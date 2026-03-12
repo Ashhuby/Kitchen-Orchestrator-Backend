@@ -3,13 +3,7 @@
 [ext_resource type="Script" path="res://Scripts/UI/MatchScene.cs" id="1_ubn5d"]
 [ext_resource type="PackedScene" uid="uid://b38m5p0g0aegi" path="res://Scenes/Player.tscn" id="2_qdcqu"]
 
-[node name="MatchScene" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="MatchScene" type="Node2D"]
 script = ExtResource("1_ubn5d")
 PlayerScene = ExtResource("2_qdcqu")
 

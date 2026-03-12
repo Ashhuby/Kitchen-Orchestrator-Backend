@@ -16,7 +16,7 @@ color = Color(0.290196, 0.317647, 0.4, 1)
 [node name="StationContainer" type="Node2D" parent="."]
 
 [node name="Station" parent="StationContainer" instance=ExtResource("1_l2loa")]
-position = Vector2(951, 127)
+position = Vector2(951, 134)
 StationId = "source_lettuce"
 StationType = 0
 SourceIngredient = "Lettuce"

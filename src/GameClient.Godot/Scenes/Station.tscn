@@ -4,19 +4,21 @@
 [ext_resource type="Texture2D" uid="uid://dthiri75qjt7r" path="res://icon.svg" id="2_nmig4"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_k7pbk"]
-size = Vector2(164, 169)
+size = Vector2(114, 142)
 
 [sub_resource type="LabelSettings" id="LabelSettings_rw8wy"]
 
 [node name="Station" type="Area2D"]
+collision_layer = 2
+collision_mask = 3
 script = ExtResource("1_ocl4j")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(-3.8147e-06, 4)
+scale = Vector2(0.742188, 0.742188)
 texture = ExtResource("2_nmig4")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-position = Vector2(1, 0.5)
+position = Vector2(0, -1)
 shape = SubResource("RectangleShape2D_k7pbk")
 
 [node name="ItemLabel" type="Label" parent="."]
