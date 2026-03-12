@@ -39,7 +39,7 @@ namespace KitchenOrchestrator.GameServer.Services
         {
             try
             {
-                var levelDef = LevelRegistry.GetById(session.LevelId);
+                var levelDef = LevelRegistry.GetById(session.LevelId ?? string.Empty);
                 var targetScore = levelDef?.TargetScore ?? 0;
 
                 // Mapping to the Positional Record: MatchResultSubmission
@@ -47,7 +47,7 @@ namespace KitchenOrchestrator.GameServer.Services
                     session.SessionId,
                     session.StartedAtUtc,
                     DateTime.UtcNow, // End time
-                    session.LevelId,
+                    session.LevelId ?? string.Empty,
                     session.TotalScore,
                     targetScore,
                     session.State.ToString(),

@@ -1,111 +1,149 @@
 using Godot;
-<<<<<<< HEAD
+using System;
+using System.Collections.Generic;
 using KitchenOrchestrator.GameClient.Godot;
-using KitchenOrchestrator.Shared.Contracts.DTOs;	
-using System.Linq;
+using KitchenOrchestrator.Shared.Contracts.DTOs;
 
 public partial class MatchScene : Control
 {
+    // ── Node References ───────────────────────────────────────────────────────
+
     private Label _statusLabel = null!;
     private Label _timerLabel = null!;
     private Label _scoreLabel = null!;
-    private VBoxContainer _orderListContainer = null!;
+    private Node2D _worldRoot = null!;
+
+    // ── Player Tracking ───────────────────────────────────────────────────────
+
+    private readonly Dictionary<Guid, Player> _spawnedPlayers = new();
+    private PackedScene _playerScene = null!;
+
+    // ── Latest State (set from SignalR thread, applied on main thread) ─────────
 
     private MatchStateDto? _latestState;
+
+    // ── Spawn Positions ───────────────────────────────────────────────────────
+
+    private static readonly Vector2[] SpawnPositions = new[]
+    {
+        new Vector2(200f, 300f),
+        new Vector2(400f, 300f),
+        new Vector2(200f, 500f),
+        new Vector2(400f, 500f),
+    };
+
+    // ── Godot Lifecycle ───────────────────────────────────────────────────────
 
     public override void _Ready()
     {
         _statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
-        _timerLabel = GetNode<Label>("VBoxContainer/TimerLabel");
-        _scoreLabel = GetNode<Label>("VBoxContainer/ScoreLabel");
-        _orderListContainer = GetNode<VBoxContainer>("VBoxContainer/OrderListContainer");
+        _timerLabel  = GetNode<Label>("VBoxContainer/TimerLabel");
+        _scoreLabel  = GetNode<Label>("VBoxContainer/ScoreLabel");
+        _worldRoot   = GetNode<Node2D>("World");
 
-        // Initial UI state
+        _playerScene = GD.Load<PackedScene>("res://Scenes/Player.tscn");
+
         _statusLabel.Text = "Match in progress...";
-        _timerLabel.Text = "02:00";
-        _scoreLabel.Text = "Score: 0";
+        _timerLabel.Text  = "";
+        _scoreLabel.Text  = "Score: 0";
 
-        // Subscribe to live state broadcasts from the server
         Bootstrap.Connection.OnMatchStateUpdated += OnMatchStateUpdated;
+        Bootstrap.Connection.OnError += OnServerError;
     }
+
+    public override void _ExitTree()
+    {
+        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
+        Bootstrap.Connection.OnError -= OnServerError;
+    }
+
+    // ── SignalR Callbacks (background thread) ─────────────────────────────────
 
     private void OnMatchStateUpdated(MatchStateDto state)
     {
-        // Store latest state and defer UI update to Godot's main thread.
-        // SignalR callbacks arrive on a background thread — touching Godot
-        // nodes directly from here will crash. CallDeferred queues the call
-        // safely onto the next frame on the main thread.
         _latestState = state;
         CallDeferred(nameof(ApplyMatchState));
     }
+
+    private void OnServerError(string error)
+    {
+        GD.PrintErr($"MatchScene server error: {error}");
+    }
+
+    // ── Main Thread: Apply State ───────────────────────────────────────────────
 
     private void ApplyMatchState()
     {
         if (_latestState == null) return;
         var state = _latestState;
 
-        // Timer — format as MM:SS
-        int totalSeconds = (int)state.TimeRemaining;
-        int minutes = totalSeconds / 60;
-        int seconds = totalSeconds % 60;
-        _timerLabel.Text = $"{minutes:D2}:{seconds:D2}";
+        UpdateHUD(state);
+        SyncPlayers(state);
 
-        // Score
-        _scoreLabel.Text = $"Score: {state.TotalScore}";
-
-        // Active orders — rebuild the list each update
-        foreach (Node child in _orderListContainer.GetChildren())
-            child.QueueFree();
-
-        foreach (var order in state.ActiveOrders)
+        if (state.TimeRemainingSeconds <= 0)
         {
-            var label = new Label();
-            int orderSeconds = (int)order.TimeRemaining;
-            string ingredients = string.Join(", ", order.RequiredIngredients);
-            label.Text = $"{order.RecipeName} [{ingredients}] — {orderSeconds}s";
-            _orderListContainer.AddChild(label);
-        }
-
-        // Player scores
-        _statusLabel.Text = string.Join("  |  ",
-            state.Players.Select(p => $"{p.DisplayName}: {p.Score}"));
-
-        // Match ended — server sets State to "Completed" on the final broadcast
-        if (state.State == "Completed")
-        {
-            CleanupSubscriptions();
-            // TODO: Transition to results screen in a future step For now, show final score so the match doesn't just freeze
-            _timerLabel.Text = "00:00";
             _statusLabel.Text = $"Match Over! Final Score: {state.TotalScore}";
+            Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
         }
     }
 
-    private void CleanupSubscriptions()
+    private void UpdateHUD(MatchStateDto state)
     {
-        Bootstrap.Connection.OnMatchStateUpdated -= OnMatchStateUpdated;
+        int seconds = (int)state.TimeRemainingSeconds;
+        _timerLabel.Text = $"{seconds / 60:D2}:{seconds % 60:D2}";
+        _scoreLabel.Text = $"Score: {state.TotalScore}";
     }
 
-    public override void _ExitTree()
+    private void SyncPlayers(MatchStateDto state)
     {
-        // Guard against double-unsubscribe if CleanupSubscriptions already ran
-        CleanupSubscriptions();
+        var localPlayerId = Bootstrap.State.PlayerId;
+        int spawnIndex = 0;
+
+        foreach (var playerDto in state.Players)
+        {
+            if (_spawnedPlayers.TryGetValue(playerDto.PlayerId, out var existing))
+            {
+                if (!existing.IsLocalPlayer)
+                    existing.ApplySnapshot(playerDto.X, playerDto.Y);
+            }
+            else
+            {
+                var spawnPos = spawnIndex < SpawnPositions.Length
+                    ? SpawnPositions[spawnIndex]
+                    : new Vector2(300f + spawnIndex * 60f, 300f);
+
+                bool isLocal = playerDto.PlayerId == localPlayerId;
+                SpawnPlayer(playerDto.PlayerId, playerDto.DisplayName, isLocal, spawnPos);
+                spawnIndex++;
+            }
+        }
+
+        var arrived = new HashSet<Guid>();
+        foreach (var p in state.Players) arrived.Add(p.PlayerId);
+
+        foreach (var id in new List<Guid>(_spawnedPlayers.Keys))
+        {
+            if (!arrived.Contains(id))
+            {
+                _spawnedPlayers[id].QueueFree();
+                _spawnedPlayers.Remove(id);
+            }
+        }
+    }
+
+    private void SpawnPlayer(Guid playerId, string displayName, bool isLocal, Vector2 position)
+    {
+        if (_playerScene == null)
+        {
+            GD.PrintErr("MatchScene: _playerScene is null — Player.tscn failed to load.");
+            return;
+        }
+
+        var instance = _playerScene.Instantiate<Player>();
+        _worldRoot.AddChild(instance);
+        instance.Initialise(playerId, displayName, isLocal, position);
+        _spawnedPlayers[playerId] = instance;
+
+        GD.Print($"Spawned {(isLocal ? "(local)" : "(remote)")} player {displayName} at {position}");
     }
 }
-=======
-
-public partial class MatchScene : Control
-{
-	private Label _statusLabel = null!;
-	private Label _timerLabel = null!;
-
-	public override void _Ready()
-	{
-		_statusLabel = GetNode<Label>("VBoxContainer/StatusLabel");
-		_timerLabel = GetNode<Label>("VBoxContainer/TimerLabel");
-
-		// Initial UI State
-		_statusLabel.Text = "Match in progress...";
-		_timerLabel.Text = "";
-	}
-}
->>>>>>> 7aec0bf44a31b01348d18fb32e88fa7cceea62ab

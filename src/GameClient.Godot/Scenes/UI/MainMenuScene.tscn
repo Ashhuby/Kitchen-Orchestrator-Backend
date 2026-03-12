@@ -40,3 +40,7 @@ text = "Settings"
 [node name="ExitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Exit"
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+horizontal_alignment = 1

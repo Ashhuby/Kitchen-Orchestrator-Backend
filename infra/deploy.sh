@@ -1,18 +1,18 @@
 #!/bin/bash
-# deploy.sh - Deploys Kitchen Orchestrator to OCI ARM64 instance
+# deploy.sh - Deploys Kitchen Orchestrator to OCI x86_64 instance
 # Usage: ./infra/deploy.sh
 
-set -e  # Exit immediately if any command fails
+set -e
 
 # ---- Configuration ----
-OCI_HOST="opc@145.241.222.124"
-SSH_KEY="C:/MyFiles/CookedKeys/ssh-key-2026-03-07.key"
+OCI_HOST="ubuntu@145.241.214.219"
+SSH_KEY="C:/MyFiles/CookedKeys/ssh-key-2026-03-11.key"
 REPO_URL="https://github.com/Ashhuby/Kitchen-Orchestrator-Backend.git"
-APP_DIR="/home/opc/kitchen-orchestrator"
+APP_DIR="/home/ubuntu/kitchen-orchestrator"
 ENV_FILE=".env"
 
 echo "=== Kitchen Orchestrator Deployment ==="
-echo "Target: $OCI_HOST (ARM64)"
+echo "Target: $OCI_HOST (x86_64)"
 echo "======================================="
 
 # ---- Step 1: Verify .env exists locally ----
@@ -21,36 +21,53 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
-# ---- Step 2: Install Docker and Compose (ARM64) ----
-echo "[1/5] Checking Docker & Docker Compose (aarch64)..."
+# ---- Step 2: Install Docker + ensure swap exists ----
+echo "[1/5] Checking Docker, Compose, and swap..."
 ssh -i "$SSH_KEY" "$OCI_HOST" bash << 'REMOTE'
-    # Install Docker Engine if missing
+    # Install Docker if missing
     if ! command -v docker &> /dev/null; then
         echo "Installing Docker..."
-        sudo dnf install -y docker
+        sudo apt-get update -y
+        sudo apt-get install -y ca-certificates curl gnupg
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -y
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         sudo systemctl start docker
         sudo systemctl enable docker
-        sudo usermod -aG docker opc
+        sudo usermod -aG docker ubuntu
+        echo "Docker installed."
     fi
 
-    # Install Docker Compose Standalone (aarch64) if missing
-    if ! command -v docker-compose &> /dev/null; then
-        echo "Installing Docker Compose for ARM64..."
-        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-        echo "Docker Compose installed."
+    # Add 2GB swap if not already present — dotnet publish needs it on 1GB RAM bc we BROKE
+    if [ ! -f /swapfile ]; then
+        echo "Creating 2GB swapfile..."
+        sudo fallocate -l 2G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        echo "Swap created."
+    else
+        echo "Swap already exists, skipping."
     fi
+
+    echo "Memory status:"
+    free -h
+
+    docker compose version
 REMOTE
 
 # ---- Step 3: Clone or update repo ----
 echo "[2/5] Cloning/updating repository..."
-# Note: pulling 'develop' as that is your current work branch
 ssh -i "$SSH_KEY" "$OCI_HOST" bash << REMOTE
     if [ ! -d "$APP_DIR" ]; then
         git clone $REPO_URL $APP_DIR
-        cd $APP_DIR && git checkout develop
+        cd $APP_DIR && git checkout feature/game-client
     else
-        cd $APP_DIR && git pull origin develop
+        cd $APP_DIR && git pull origin feature/game-client
     fi
 REMOTE
 
@@ -58,22 +75,36 @@ REMOTE
 echo "[3/5] Copying .env file..."
 scp -i "$SSH_KEY" "$ENV_FILE" "$OCI_HOST:$APP_DIR/.env"
 
-# ---- Step 5: Build and run containers ----
+# ---- Step 5: Build sequentially then start ----
 echo "[4/5] Building and starting containers..."
+echo "      (Building one at a time to avoid OOM on 1GB RAM — this will take ~5 mins)"
 ssh -i "$SSH_KEY" "$OCI_HOST" bash << REMOTE
     cd $APP_DIR
-    # Using the hyphenated version we just installed
-    docker-compose build
-    docker-compose up -d
+    sudo docker compose down || true
+
+    echo "--- Building identity-api ---"
+    sudo docker compose build identity-api
+
+    echo "--- Building game-server ---"
+    sudo docker compose build game-server
+
+    echo "--- Building nginx ---"
+    sudo docker compose build nginx || true  # nginx uses a pre-built image, this is a no-op
+
+    echo "--- Starting all containers ---"
+    sudo docker compose up -d
 REMOTE
 
 # ---- Step 6: Verify ----
 echo "[5/5] Verifying deployment..."
-sleep 8
-# Using localhost on the remote side via SSH for the health check
-ssh -i "$SSH_KEY" "$OCI_HOST" "curl -s http://localhost:5000/health" | echo "IdentityAPI: $(cat)"
-ssh -i "$SSH_KEY" "$OCI_HOST" "curl -s http://localhost:5001/health" | echo "GameServer: $(cat)"
+sleep 10
+echo -n "IdentityAPI: "
+ssh -i "$SSH_KEY" "$OCI_HOST" "curl -s http://localhost/health-identity"
+echo ""
+echo -n "GameServer:  "
+ssh -i "$SSH_KEY" "$OCI_HOST" "curl -s http://localhost/health-game"
+echo ""
 
 echo ""
 echo "=== Deployment Complete ==="
-echo "REMINDER: Ensure OCI Security List allows inbound TCP on ports 5000 and 5001"
+echo "Server IP: 145.241.214.219"

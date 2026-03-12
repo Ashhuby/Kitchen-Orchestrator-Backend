@@ -9,60 +9,38 @@ namespace KitchenOrchestrator.GameServer.Services
 {
     public interface IMatchSimulationService
     {
-        DeliveryResult DeliverDish(Guid sessionId, Guid playerId, List<Ingredient> ingredients);
+        DeliveryResult TryDeliver(MatchSession session, Guid playerId, List<Ingredient> ingredients);
     }
 
     public class MatchSimulationService : IMatchSimulationService
     {
-        private readonly IMatchSessionService _sessionService;
         private readonly ILogger<MatchSimulationService> _logger;
 
-        public MatchSimulationService(
-            IMatchSessionService sessionService,
-            ILogger<MatchSimulationService> logger)
+        public MatchSimulationService(ILogger<MatchSimulationService> logger)
         {
-            _sessionService = sessionService;
             _logger = logger;
         }
 
-        public DeliveryResult DeliverDish(Guid sessionId, Guid playerId, List<Ingredient> ingredients)
+        public DeliveryResult TryDeliver(MatchSession session, Guid playerId, List<Ingredient> ingredients)
         {
-            var session = _sessionService.GetSession(sessionId);
-
-            if (session == null)
-                return new DeliveryResult(false, 0, false, "Session not found.");
-
             if (session.State != MatchState.Active)
                 return new DeliveryResult(false, 0, false, "Match is not active.");
 
             lock (session.Orders)
             {
-                // Find the first InProgress order whose recipe matches the submitted ingredients.
-                // e.g. [Patty, BurgerBun] matches [BurgerBun, Patty] -- a player should not be penalised for a different assembly order.
-                var matchedOrder = session.Orders.FirstOrDefault(o =>
+                var matchingOrder = session.Orders.FirstOrDefault(o =>
                     o.Status == OrderStatus.InProgress &&
-                    new HashSet<Ingredient>(ingredients).SetEquals(o.Recipe.RequiredIngredients));
+                    o.Recipe.RequiredIngredients.ToHashSet().SetEquals(ingredients));
 
-                if (matchedOrder == null)
-                    return new DeliveryResult(false, 0, false, "No matching active order found.");
+                if (matchingOrder == null)
+                    return new DeliveryResult(false, 0, false, "No matching order found.");
 
-                // Mark delivered before touching score so the order cannot be double-claimed
-                matchedOrder.Status = OrderStatus.Delivered;
+                matchingOrder.Status = OrderStatus.Delivered;
 
-                // Score: seconds remaining is floored to int for ScoreCalculator
-                int secondsRemaining = (int)matchedOrder.Timer.TimeRemaining;
+                int secondsRemaining = (int)matchingOrder.Timer.TimeRemaining;
+                bool isPerfect = matchingOrder.Timer.TimeRemaining / matchingOrder.Timer.TotalDuration > 0.8f;
+                int score = ScoreCalculator.Calculate(matchingOrder.Recipe, secondsRemaining, isPerfect);
 
-                // Perfect = delivered with more than 80% time remaining on the order timer
-                bool isPerfect = matchedOrder.Timer.TimeRemaining / matchedOrder.Timer.TotalDuration > 0.8f;
-
-                int score = ScoreCalculator.Calculate(matchedOrder.Recipe, secondsRemaining, isPerfect);
-
-                // Update session-level totals
-                session.TotalScore += score;
-                session.CompletedOrders++;
-                if (isPerfect) session.PerfectOrders++;
-
-                // Update the delivering player's individual stats
                 var player = session.Players.FirstOrDefault(p => p.PlayerId == playerId);
                 if (player != null)
                 {
@@ -70,9 +48,13 @@ namespace KitchenOrchestrator.GameServer.Services
                     player.OrdersDelivered++;
                 }
 
+                session.TotalScore += score;
+                session.CompletedOrders++;
+                if (isPerfect) session.PerfectOrders++;
+
                 _logger.LogInformation(
-                    "Player {PlayerId} delivered {Recipe} in session {SessionId}. Score: +{Score} Perfect: {IsPerfect}",
-                    playerId, matchedOrder.Recipe.Name, sessionId, score, isPerfect);
+                    "Player {PlayerId} delivered {Recipe} for {Score} points. Perfect: {IsPerfect}",
+                    playerId, matchingOrder.Recipe.Name, score, isPerfect);
 
                 return new DeliveryResult(true, score, isPerfect, null);
             }

@@ -8,8 +8,7 @@ namespace KitchenOrchestrator.Shared.GameLogic.Levels
             new LevelDefinition("Map0", "TEST", 600, 5f, 5, 5),
             new LevelDefinition("Map1", "SaladBar", 600, 120f, 5, 5),
             new LevelDefinition("Map2", "SushiBar", 800, 120f, 3, 3),
-            new LevelDefinition("Map3", "BurgerDiner", 1200, 120f, 5, 3)        
-            
+            new LevelDefinition("Map3", "BurgerDiner", 1200, 120f, 5, 3)
         };
 
         public static LevelDefinition? GetById(string id)
