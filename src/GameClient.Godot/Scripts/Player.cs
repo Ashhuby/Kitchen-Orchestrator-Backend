@@ -11,8 +11,9 @@ public partial class Player : CharacterBody2D
 
     /// <summary>
     /// True if this player is currently holding an item.
-    /// Station.cs reads this to determine the correct context-sensitive action.
-    /// Value is updated from MatchStateDto — the server is authoritative.
+    /// Updated optimistically by Station.cs immediately when an action is sent,
+    /// without waiting for the server round-trip. The server is still authoritative
+    /// — if the action is rejected, the next MatchStateDto will correct this.
     /// </summary>
     public bool HasHeldItem { get; private set; }
 
@@ -22,7 +23,7 @@ public partial class Player : CharacterBody2D
 
     // ── Movement ──────────────────────────────────────────────────────────────
     private const float Speed = 200f;
-    private const float PositionSendIntervalSec = 0.1f; // 10Hz
+    private const float PositionSendIntervalSec = 0.1f;
     private float _positionSendTimer = 0f;
 
     // ── Interpolation (remote players) ────────────────────────────────────────
@@ -31,22 +32,22 @@ public partial class Player : CharacterBody2D
 
     public override void _Ready()
     {
-        _sprite = GetNode<ColorRect>("Sprite");
+        _sprite    = GetNode<ColorRect>("Sprite");
         _nameLabel = GetNode<Label>("NameLabel");
     }
 
     public void Initialise(Guid playerId, string displayName, bool isLocal, Vector2 spawnPosition)
     {
-        PlayerId = playerId;
-        IsLocalPlayer = isLocal;
-        Position = spawnPosition;
+        PlayerId        = playerId;
+        IsLocalPlayer   = isLocal;
+        Position        = spawnPosition;
         _targetPosition = spawnPosition;
         _nameLabel.Text = displayName;
 
         if (isLocal)
-            _sprite.Color = new Color(0.2f, 0.6f, 1.0f); // Blue for local
+            _sprite.Color = new Color(0.2f, 0.6f, 1.0f); // Blue
         else
-            _sprite.Color = new Color(1.0f, 0.4f, 0.2f); // Orange for remotes
+            _sprite.Color = new Color(1.0f, 0.4f, 0.2f); // Orange
     }
 
     public override void _PhysicsProcess(double delta)
@@ -61,9 +62,9 @@ public partial class Player : CharacterBody2D
     {
         var dir = Vector2.Zero;
         if (Input.IsActionPressed("ui_right")) dir.X += 1;
-        if (Input.IsActionPressed("ui_left")) dir.X -= 1;
-        if (Input.IsActionPressed("ui_down")) dir.Y += 1;
-        if (Input.IsActionPressed("ui_up")) dir.Y -= 1;
+        if (Input.IsActionPressed("ui_left"))  dir.X -= 1;
+        if (Input.IsActionPressed("ui_down"))  dir.Y += 1;
+        if (Input.IsActionPressed("ui_up"))    dir.Y -= 1;
 
         Velocity = dir.Normalized() * Speed;
         MoveAndSlide();
@@ -86,35 +87,20 @@ public partial class Player : CharacterBody2D
         Position = Position.Lerp(_targetPosition, InterpolationSpeed * delta);
     }
 
-    /// <summary>
-    /// Called by MatchScene each tick for remote players.
-    /// </summary>
     public void ApplySnapshot(float x, float y)
     {
         _targetPosition = new Vector2(x, y);
     }
 
     /// <summary>
-    /// Called by MatchScene when a new MatchStateDto arrives.
-    /// Keeps the client's HasHeldItem in sync with the server's authoritative state.
-    /// </summary>
-    public void ApplyPlayerState(PlayerPositionDto dto)
-    {
-        if (!IsLocalPlayer)
-            ApplySnapshot(dto.X, dto.Y);
-
-        // HasHeldItem is derived from the MatchStateDto player entry.
-        // MatchStateDto must include HeldIngredient per player for this to work.
-        // For now this is set by MatchScene after parsing station states.
-        // See MatchScene.ApplyMatchState for the assignment.
-    }
-
-    /// <summary>
-    /// Called by MatchScene to push held item state from server authority.
+    /// Called by Station.cs immediately after sending an action to the server.
+    /// Keeps the local player's held item state in sync optimistically so that
+    /// ResolveAction() on the next station gives the correct result without
+    /// waiting for the server's MatchStateDto broadcast.
     /// </summary>
     public void SetHeldItem(bool hasItem)
     {
         HasHeldItem = hasItem;
-        // TODO: show/hide held item sprite
+        // TODO: show/hide held item visual on player sprite
     }
 }

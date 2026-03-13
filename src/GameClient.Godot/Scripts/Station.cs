@@ -59,6 +59,14 @@ public partial class Station : Area2D
             StationId,
             action.Value));
 
+        // Optimistically update the local player's held item state so that
+        // the next station visited immediately resolves the correct action
+        // without waiting for the server's MatchStateDto broadcast.
+        ApplyOptimisticHeldItem(action.Value);
+
+        // Update the hint immediately to reflect new state
+        UpdateActionHint();
+
         GetViewport().SetInputAsHandled();
     }
 
@@ -98,6 +106,7 @@ public partial class Station : Area2D
         if (body is not Player player) return;
         if (!player.IsLocalPlayer) return;
 
+        // Cancel chopping if player walks away mid-prep
         if (StationType == StationType.ChoppingBoard && _lastKnownState?.IsOccupied == true)
         {
             var sessionId = Bootstrap.State.CurrentSessionId;
@@ -114,6 +123,33 @@ public partial class Station : Area2D
         _playerInRange      = false;
         _actionHint.Visible = false;
         GD.Print($"[Station {StationId}] Player left range.");
+    }
+
+    // ── Optimistic held item update ───────────────────────────────────────────
+
+    /// <summary>
+    /// Updates the local player's HasHeldItem immediately after an action is sent,
+    /// without waiting for the server broadcast. If the server rejects the action,
+    /// the next MatchStateDto will correct it.
+    /// </summary>
+    private void ApplyOptimisticHeldItem(StationActionType action)
+    {
+        if (_localPlayer == null) return;
+
+        switch (action)
+        {
+            case StationActionType.Pickup:
+            case StationActionType.Collect:
+                _localPlayer.SetHeldItem(true);
+                break;
+
+            case StationActionType.Deposit:
+            case StationActionType.Deliver:
+                _localPlayer.SetHeldItem(false);
+                break;
+
+            // BeginPrep and CancelPrep don't change held item state
+        }
     }
 
     // ── Action resolution ─────────────────────────────────────────────────────
@@ -138,9 +174,9 @@ public partial class Station : Area2D
                 null,
 
             StationType.ChoppingBoard =>
-                stationComplete && !playerHasItem                                         ? StationActionType.Collect  :
-                playerHasItem && !stationHasItem                                          ? StationActionType.Deposit  :
-                stationHasItem && !stationComplete && !stationOccupied && !playerHasItem  ? StationActionType.BeginPrep :
+                stationComplete && !playerHasItem                                          ? StationActionType.Collect  :
+                playerHasItem && !stationHasItem                                           ? StationActionType.Deposit  :
+                stationHasItem && !stationComplete && !stationOccupied && !playerHasItem   ? StationActionType.BeginPrep :
                 null,
 
             StationType.Stove =>
@@ -166,12 +202,12 @@ public partial class Station : Area2D
 
         _actionHint.Text = action switch
         {
-            StationActionType.Pickup    => "[E] Pick up",
-            StationActionType.Deposit   => "[E] Place",
-            StationActionType.BeginPrep => "[E] Chop",
+            StationActionType.Pickup     => "[E] Pick up",
+            StationActionType.Deposit    => "[E] Place",
+            StationActionType.BeginPrep  => "[E] Chop",
             StationActionType.CancelPrep => "[E] Cancel",
-            StationActionType.Collect   => "[E] Collect",
-            StationActionType.Deliver   => "[E] Deliver",
+            StationActionType.Collect    => "[E] Collect",
+            StationActionType.Deliver    => "[E] Deliver",
             _ => "[E]"
         };
         _actionHint.Visible = true;
