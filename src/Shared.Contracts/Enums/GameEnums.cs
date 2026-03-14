@@ -34,25 +34,23 @@ namespace KitchenOrchestrator.Shared.Contracts.Enums
         DeliverDish = 4
     }
 
-    // Discriminates what a player intends to do at a station.
-    // The server resolves which is valid based on station type + player held item.
     public enum StationActionType
     {
-        Pickup = 0,      // IngredientSource: give player raw ingredient
-        Deposit = 1,     // ChoppingBoard / Stove / Counter: place held item onto station
-        BeginPrep = 2,   // ChoppingBoard: start timed prep (player must stay)
-        CancelPrep = 3,  // ChoppingBoard: player walks away — resets progress
-        Collect = 4,     // ChoppingBoard / Stove / Counter: take item off station
-        Deliver = 5      // DeliveryCounter: submit held item against active orders
+        Pickup = 0,       // IngredientSource / PlateSource: give player raw item or empty plate
+        Deposit = 1,      // ChoppingBoard / Stove / Counter: place held ingredient onto station
+        BeginPrep = 2,    // ChoppingBoard: start timed prep
+        CancelPrep = 3,   // ChoppingBoard: player walks away — resets progress
+        Collect = 4,      // ChoppingBoard / Stove / Counter: take item off station
+        Deliver = 5,      // DeliveryCounter: submit held plate against active orders
+        AddToPlate = 6    // Counter: add held ingredient onto a plate that's sitting on the counter
     }
 
-    // Tracks how far through the cooking pipeline an ingredient is.
     public enum ItemPrepState
     {
         Raw = 0,
         Chopped = 1,
         Cooked = 2,
-        Burned = 3       // Item must be discarded, cannot be recovered
+        Burned = 3
     }
 
     public enum StationType
@@ -61,6 +59,7 @@ namespace KitchenOrchestrator.Shared.Contracts.Enums
         ChoppingBoard = 1,
         Stove = 2,
         DeliveryCounter = 3,
-        Counter = 4      // Passive pass-through — players deposit/pick up items here
+        Counter = 4,
+        PlateSource = 5    // Dispenses empty plates, infinite supply
     }
 }

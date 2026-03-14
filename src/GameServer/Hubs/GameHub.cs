@@ -21,10 +21,10 @@ namespace KitchenOrchestrator.GameServer.Hubs
             IMatchSimulationService simulationService,
             ILogger<GameHub> logger)
         {
-            _jwtValidation = jwtValidation;
-            _sessionService = sessionService;
+            _jwtValidation    = jwtValidation;
+            _sessionService   = sessionService;
             _simulationService = simulationService;
-            _logger = logger;
+            _logger           = logger;
         }
 
         // ── Connection ────────────────────────────────────────────────────────
@@ -49,8 +49,8 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 return;
             }
 
-            Context.Items["PlayerId"] = claims.PlayerId;
-            Context.Items["SteamId"] = claims.SteamId;
+            Context.Items["PlayerId"]    = claims.PlayerId;
+            Context.Items["SteamId"]     = claims.SteamId;
             Context.Items["DisplayName"] = claims.DisplayName;
 
             await base.OnConnectedAsync();
@@ -82,15 +82,15 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
         public async Task<LobbyCreatedDto> CreateLobby(string lobbyName)
         {
-            var playerId = GetPlayerId();
-            var steamId = GetSteamId();
+            var playerId    = GetPlayerId();
+            var steamId     = GetSteamId();
             var displayName = GetDisplayName();
 
             if (string.IsNullOrWhiteSpace(lobbyName))
                 lobbyName = $"{displayName}'s Lobby";
 
             var session = _sessionService.CreateSession(lobbyName);
-            var player = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
+            var player  = new ConnectedPlayer(Context.ConnectionId, playerId, steamId, displayName);
 
             session.SetHost(Context.ConnectionId);
             _sessionService.AddPlayerToSession(session.SessionId, player);
@@ -125,8 +125,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             }
 
             var playerId = GetPlayerId();
-            var player = new ConnectedPlayer(
-                Context.ConnectionId, playerId, GetSteamId(), GetDisplayName());
+            var player   = new ConnectedPlayer(Context.ConnectionId, playerId, GetSteamId(), GetDisplayName());
 
             _sessionService.AddPlayerToSession(sessionId, player);
             await Groups.AddToGroupAsync(Context.ConnectionId, sessionId.ToString());
@@ -293,6 +292,9 @@ namespace KitchenOrchestrator.GameServer.Hubs
                 case StationActionType.Deliver:
                     await HandleDeliver(session, player, request.StationId);
                     break;
+                case StationActionType.AddToPlate:
+                    await HandleAddToPlate(session, player, request.StationId);
+                    break;
             }
         }
 
@@ -301,19 +303,28 @@ namespace KitchenOrchestrator.GameServer.Hubs
         private async Task HandlePickup(MatchSession session, ConnectedPlayer player, string stationId)
         {
             if (!session.Stations.TryGetValue(stationId, out var station)) return;
-            if (station.Type != StationType.IngredientSource && station.Type != StationType.Counter) return;
             if (player.HeldItem != null) return;
 
-            if (station.Type == StationType.IngredientSource)
+            switch (station.Type)
             {
-                if (station.SourceIngredient == null) return;
-                player.HeldItem = new HeldItem(station.SourceIngredient.Value);
-            }
-            else
-            {
-                if (station.HeldItem == null) return;
-                player.HeldItem = station.HeldItem;
-                station.HeldItem = null;
+                case StationType.IngredientSource:
+                    if (station.SourceIngredient == null) return;
+                    player.HeldItem = new HeldItem(station.SourceIngredient.Value);
+                    break;
+
+                case StationType.PlateSource:
+                    // Dispense a fresh empty plate — infinite supply, no station state change
+                    player.HeldItem = new HeldItem(new PlateState());
+                    break;
+
+                case StationType.Counter:
+                    if (station.HeldItem == null) return;
+                    player.HeldItem = station.HeldItem;
+                    station.HeldItem = null;
+                    break;
+
+                default:
+                    return;
             }
 
             await BroadcastMatchState(session);
@@ -325,13 +336,37 @@ namespace KitchenOrchestrator.GameServer.Hubs
             if (player.HeldItem == null) return;
             if (station.HeldItem != null) return;
             if (station.Type == StationType.IngredientSource) return;
+            if (station.Type == StationType.PlateSource) return;
             if (station.Type == StationType.DeliveryCounter) return;
 
+            // Plates can only be deposited onto counters
+            if (player.HeldItem.IsPlate && station.Type != StationType.Counter) return;
+
             station.HeldItem = player.HeldItem;
-            player.HeldItem = null;
+            player.HeldItem  = null;
 
             if (station.Type == StationType.Stove)
                 station.BeginProcessing(10f);
+
+            await BroadcastMatchState(session);
+        }
+
+        private async Task HandleAddToPlate(MatchSession session, ConnectedPlayer player, string stationId)
+        {
+            if (!session.Stations.TryGetValue(stationId, out var station)) return;
+            if (station.Type != StationType.Counter) return;
+
+            // Station must have a plate on it
+            if (station.HeldItem == null || !station.HeldItem.IsPlate) return;
+
+            // Player must be holding an ingredient (not a plate)
+            if (player.HeldItem == null || !player.HeldItem.IsIngredient) return;
+
+            station.HeldItem.Plate!.AddIngredient(player.HeldItem.Ingredient!.Value);
+            player.HeldItem = null;
+
+            _logger.LogInformation("Player {PlayerId} added {Ingredient} to plate on {StationId}. Plate now has {Count} ingredients.",
+                player.PlayerId, player.HeldItem?.Ingredient, stationId, station.HeldItem.Plate.Contents.Count);
 
             await BroadcastMatchState(session);
         }
@@ -373,7 +408,7 @@ namespace KitchenOrchestrator.GameServer.Hubs
             }
             else return;
 
-            player.HeldItem = station.HeldItem;
+            player.HeldItem  = station.HeldItem;
             station.HeldItem = null;
             station.ResetProgress();
             station.OccupyingPlayerId = null;
@@ -386,16 +421,24 @@ namespace KitchenOrchestrator.GameServer.Hubs
             if (station.Type != StationType.DeliveryCounter) return;
             if (player.HeldItem == null) return;
 
-            var result = _simulationService.TryDeliver(session, player.PlayerId, new List<Ingredient> { player.HeldItem.Ingredient });
+            // Must be delivering a plate, not a raw ingredient
+            if (!player.HeldItem.IsPlate)
+            {
+                await Clients.Caller.SendAsync("Error", "You must deliver a plated dish, not a loose ingredient.");
+                return;
+            }
+
+            var plate = player.HeldItem.Plate!;
+            if (plate.IsEmpty)
+            {
+                await Clients.Caller.SendAsync("Error", "The plate is empty.");
+                return;
+            }
+
+            var result = _simulationService.TryDeliver(session, player.PlayerId, plate.Contents);
 
             if (result.Success)
-            {
-                player.HeldItem = null;
-                player.Score += result.ScoreAwarded;
-                session.TotalScore += result.ScoreAwarded;
-                if (result.IsPerfect) session.PerfectOrders++;
-                session.CompletedOrders++;
-            }
+                player.HeldItem = null; // Plate consumed on successful delivery
 
             await Clients.Caller.SendAsync("DeliveryResult", result);
             await BroadcastMatchState(session);
@@ -417,27 +460,82 @@ namespace KitchenOrchestrator.GameServer.Hubs
 
         private async Task BroadcastMatchState(MatchSession session)
         {
+            var players = session.Players.Select(p =>
+            {
+                string? heldItemType = null;
+                string? heldIngredient = null;
+                IReadOnlyList<string>? heldPlateContents = null;
+
+                if (p.HeldItem != null)
+                {
+                    if (p.HeldItem.IsIngredient)
+                    {
+                        heldItemType    = "Ingredient";
+                        heldIngredient  = p.HeldItem.Ingredient.ToString();
+                    }
+                    else
+                    {
+                        heldItemType        = "Plate";
+                        heldPlateContents   = p.HeldItem.Plate!.Contents
+                            .Select(i => i.ToString())
+                            .ToList()
+                            .AsReadOnly();
+                    }
+                }
+
+                return new PlayerPositionDto(
+                    p.PlayerId, p.DisplayName, p.X, p.Y,
+                    heldItemType, heldIngredient, heldPlateContents);
+            }).ToList().AsReadOnly();
+
+            var stations = session.Stations.Values.Select(s =>
+            {
+                string? heldIngredient = null;
+                string? prepState      = null;
+                bool hasPlate          = false;
+                IReadOnlyList<string>? plateContents = null;
+
+                if (s.HeldItem != null)
+                {
+                    if (s.HeldItem.IsIngredient)
+                    {
+                        heldIngredient = s.HeldItem.Ingredient.ToString();
+                        prepState      = s.HeldItem.PrepState.ToString();
+                    }
+                    else
+                    {
+                        hasPlate      = true;
+                        plateContents = s.HeldItem.Plate!.Contents
+                            .Select(i => i.ToString())
+                            .ToList()
+                            .AsReadOnly();
+                    }
+                }
+
+                return new StationStateDto(
+                    s.StationId,
+                    s.Type.ToString(),
+                    heldIngredient,
+                    prepState,
+                    s.ProgressNormalized,
+                    s.OccupyingPlayerId != null,
+                    hasPlate,
+                    plateContents);
+            }).ToList().AsReadOnly();
+
             var state = new MatchStateDto(
                 session.SessionId,
                 session.State.ToString(),
-                session.Players.Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y)).ToList().AsReadOnly(),
-                session.Stations.Values.Select(s => new StationStateDto(
-                    s.StationId,
-                    s.Type.ToString(),
-                    s.HeldItem?.Ingredient.ToString(),
-                    s.HeldItem?.PrepState.ToString(),
-                    s.ProgressNormalized,
-                    s.OccupyingPlayerId != null
-                )).ToList().AsReadOnly(),
+                players,
+                stations,
                 session.TimeRemainingSeconds,
-                session.TotalScore
-            );
+                session.TotalScore);
 
             await Clients.Group(session.SessionId.ToString()).SendAsync("MatchStateUpdated", state);
         }
 
-        private Guid GetPlayerId() => (Guid)Context.Items["PlayerId"]!;
-        private string GetSteamId() => (string)Context.Items["SteamId"]!;
+        private Guid GetPlayerId()    => (Guid)Context.Items["PlayerId"]!;
+        private string GetSteamId()   => (string)Context.Items["SteamId"]!;
         private string GetDisplayName() => (string)Context.Items["DisplayName"]!;
     }
 }

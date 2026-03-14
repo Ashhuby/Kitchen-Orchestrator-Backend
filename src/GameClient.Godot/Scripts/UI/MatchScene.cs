@@ -5,23 +5,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-/// <summary>
-/// Root scene for an active match.
-/// Inherits Node2D — NOT Control — so it does not consume keyboard input
-/// before Station nodes get a chance to handle it via _UnhandledKeyInput.
-/// HUD elements live on a CanvasLayer child and are unaffected by this change.
-/// </summary>
 public partial class MatchScene : Node2D
 {
-    // ── Child nodes (always present in MatchScene.tscn) ───────────────────────
     private Label _timerLabel = null!;
     private Label _scoreLabel = null!;
 
-    // ── Set after map is loaded ───────────────────────────────────────────────
     private Node2D _playerContainer = null!;
     private Node2D _stationContainer = null!;
 
-    // ── Runtime state ─────────────────────────────────────────────────────────
     private readonly Dictionary<Guid, Player> _players = new();
     private readonly Dictionary<string, Station> _stations = new();
     private MatchStateDto? _pendingState;
@@ -86,7 +77,6 @@ public partial class MatchScene : Node2D
 
         _playerContainer  = mapInstance.GetNodeOrNull<Node2D>("PlayerContainer")
             ?? CreateFallbackContainer(mapInstance, "PlayerContainer");
-
         _stationContainer = mapInstance.GetNodeOrNull<Node2D>("StationContainer")
             ?? CreateFallbackContainer(mapInstance, "StationContainer");
 
@@ -103,8 +93,7 @@ public partial class MatchScene : Node2D
     private Node2D CreateFallbackContainer(Node parent, string name)
     {
         GD.PrintErr($"MatchScene: Map scene missing '{name}' node — creating empty fallback.");
-        var node = new Node2D();
-        node.Name = name;
+        var node = new Node2D { Name = name };
         parent.AddChild(node);
         return node;
     }
@@ -153,12 +142,13 @@ public partial class MatchScene : Node2D
         {
             if (!_players.TryGetValue(dto.PlayerId, out var playerNode))
             {
+                GD.Print($"[MatchScene] DTO PlayerId={dto.PlayerId} LocalPlayerId={Bootstrap.State.PlayerId}");
                 playerNode = SpawnRemotePlayer(dto.PlayerId, dto.DisplayName);
                 if (playerNode == null) continue;
             }
 
-            if (!playerNode.IsLocalPlayer)
-                playerNode.ApplySnapshot(dto.X, dto.Y);
+            // Apply authoritative server state to all players — corrects optimistic mispredictions
+            playerNode.ApplyAuthoritative(dto);
         }
 
         foreach (var dto in state.Stations)

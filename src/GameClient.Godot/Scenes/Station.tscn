@@ -13,6 +13,13 @@ collision_layer = 2
 collision_mask = 3
 script = ExtResource("1_ocl4j")
 
+[node name="Background" type="ColorRect" parent="."]
+offset_left = -57.0
+offset_top = -71.0
+offset_right = 57.0
+offset_bottom = 71.0
+color = Color(0.2, 0.2, 0.2, 1)
+
 [node name="Sprite2D" type="Sprite2D" parent="."]
 scale = Vector2(0.742188, 0.742188)
 texture = ExtResource("2_nmig4")
@@ -21,27 +28,35 @@ texture = ExtResource("2_nmig4")
 position = Vector2(0, -1)
 shape = SubResource("RectangleShape2D_k7pbk")
 
-[node name="ItemLabel" type="Label" parent="."]
-offset_left = -19.0
-offset_top = -88.0
-offset_right = 21.0
-offset_bottom = -65.0
-text = "label"
+[node name="TypeLabel" type="Label" parent="."]
+offset_left = -57.0
+offset_top = -71.0
+offset_right = 57.0
+offset_bottom = -48.0
+text = "Type"
 horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ItemLabel" type="Label" parent="."]
+offset_left = -57.0
+offset_top = -48.0
+offset_right = 57.0
+offset_bottom = -25.0
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="ProgressBar" type="ProgressBar" parent="."]
-offset_left = -60.0
-offset_top = 73.0
-offset_right = 62.0
-offset_bottom = 81.0
+offset_left = -57.0
+offset_top = 55.0
+offset_right = 57.0
+offset_bottom = 71.0
 rounded = true
 show_percentage = false
 
 [node name="ActionHint" type="Label" parent="."]
-offset_left = -43.0
-offset_top = 81.0
-offset_right = 44.0
-offset_bottom = 104.0
-text = "action"
+offset_left = -57.0
+offset_top = 71.0
+offset_right = 57.0
+offset_bottom = 94.0
 label_settings = SubResource("LabelSettings_rw8wy")
 horizontal_alignment = 1

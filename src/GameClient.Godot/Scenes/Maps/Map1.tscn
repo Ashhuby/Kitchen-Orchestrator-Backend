@@ -40,3 +40,8 @@ StationId = "counter_0"
 position = Vector2(452, 108)
 StationId = "delivery"
 StationType = 3
+
+[node name="Station6" parent="StationContainer" instance=ExtResource("1_l2loa")]
+position = Vector2(439, 523)
+StationId = "plate_source"
+StationType = 5

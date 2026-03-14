@@ -5,23 +5,36 @@ using KitchenOrchestrator.Shared.Contracts.Enums;
 
 public partial class Station : Area2D
 {
-    // ── Inspector ─────────────────────────────────────────────────────────────
     [Export] public string StationId { get; set; } = string.Empty;
     [Export] public StationType StationType { get; set; } = StationType.Counter;
     [Export] public string SourceIngredient { get; set; } = string.Empty;
 
-    // ── Child nodes ───────────────────────────────────────────────────────────
+    private ColorRect _background = null!;
+    private Label _typeLabel = null!;
     private Label _itemLabel = null!;
     private ProgressBar _progressBar = null!;
     private Label _actionHint = null!;
 
-    // ── Runtime state ─────────────────────────────────────────────────────────
     private bool _playerInRange = false;
     private Player? _localPlayer;
     private StationStateDto? _lastKnownState;
 
+    // Debug colours per station type
+    private static Color ColorFor(StationType t) => t switch
+    {
+        StationType.IngredientSource => new Color(0.2f, 0.6f, 0.2f),   // green
+        StationType.PlateSource      => new Color(0.6f, 0.6f, 0.6f),   // grey
+        StationType.ChoppingBoard    => new Color(0.6f, 0.5f, 0.2f),   // brown
+        StationType.Stove            => new Color(0.7f, 0.2f, 0.1f),   // red
+        StationType.Counter          => new Color(0.3f, 0.3f, 0.5f),   // blue-grey
+        StationType.DeliveryCounter  => new Color(0.6f, 0.2f, 0.6f),   // purple
+        _                            => new Color(0.2f, 0.2f, 0.2f)
+    };
+
     public override void _Ready()
     {
+        _background  = GetNode<ColorRect>("Background");
+        _typeLabel   = GetNode<Label>("TypeLabel");
         _itemLabel   = GetNode<Label>("ItemLabel");
         _progressBar = GetNode<ProgressBar>("ProgressBar");
         _actionHint  = GetNode<Label>("ActionHint");
@@ -29,6 +42,19 @@ public partial class Station : Area2D
         _progressBar.Visible = false;
         _actionHint.Visible  = false;
         _itemLabel.Text      = string.Empty;
+
+        // Set background colour and type label once — they never change
+        _background.Color = ColorFor(StationType);
+        _typeLabel.Text   = StationType switch
+        {
+            StationType.IngredientSource => $"SRC\n{SourceIngredient}",
+            StationType.PlateSource      => "PLATES",
+            StationType.ChoppingBoard    => "CHOP",
+            StationType.Stove            => "STOVE",
+            StationType.Counter          => "COUNTER",
+            StationType.DeliveryCounter  => "DELIVER",
+            _ => StationType.ToString()
+        };
 
         SetProcessUnhandledKeyInput(true);
 
@@ -55,18 +81,10 @@ public partial class Station : Area2D
         }
 
         Bootstrap.Connection.SendActionAsync(new StationActionRequest(
-            sessionId.Value,
-            StationId,
-            action.Value));
+            sessionId.Value, StationId, action.Value));
 
-        // Optimistically update the local player's held item state so that
-        // the next station visited immediately resolves the correct action
-        // without waiting for the server's MatchStateDto broadcast.
-        ApplyOptimisticHeldItem(action.Value);
-
-        // Update the hint immediately to reflect new state
+        ApplyOptimisticState(action.Value);
         UpdateActionHint();
-
         GetViewport().SetInputAsHandled();
     }
 
@@ -76,9 +94,21 @@ public partial class Station : Area2D
     {
         _lastKnownState = state;
 
-        _itemLabel.Text = state.HeldIngredient != null
-            ? $"{state.HeldIngredient} ({state.PrepState})"
-            : string.Empty;
+        if (state.HasPlate)
+        {
+            var contents = state.PlateContents != null && state.PlateContents.Count > 0
+                ? string.Join("+", state.PlateContents)
+                : "empty";
+            _itemLabel.Text = $"[{contents}]";
+        }
+        else if (state.HeldIngredient != null)
+        {
+            _itemLabel.Text = $"{state.HeldIngredient}\n({state.PrepState})";
+        }
+        else
+        {
+            _itemLabel.Text = string.Empty;
+        }
 
         bool isActive = state.ProgressNormalized > 0f && state.ProgressNormalized < 1f;
         _progressBar.Visible = isActive;
@@ -106,16 +136,13 @@ public partial class Station : Area2D
         if (body is not Player player) return;
         if (!player.IsLocalPlayer) return;
 
-        // Cancel chopping if player walks away mid-prep
         if (StationType == StationType.ChoppingBoard && _lastKnownState?.IsOccupied == true)
         {
             var sessionId = Bootstrap.State.CurrentSessionId;
             if (sessionId.HasValue)
             {
                 Bootstrap.Connection.SendActionAsync(new StationActionRequest(
-                    sessionId.Value,
-                    StationId,
-                    StationActionType.CancelPrep));
+                    sessionId.Value, StationId, StationActionType.CancelPrep));
             }
         }
 
@@ -125,30 +152,40 @@ public partial class Station : Area2D
         GD.Print($"[Station {StationId}] Player left range.");
     }
 
-    // ── Optimistic held item update ───────────────────────────────────────────
+    // ── Optimistic state ──────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Updates the local player's HasHeldItem immediately after an action is sent,
-    /// without waiting for the server broadcast. If the server rejects the action,
-    /// the next MatchStateDto will correct it.
-    /// </summary>
-    private void ApplyOptimisticHeldItem(StationActionType action)
+    private void ApplyOptimisticState(StationActionType action)
     {
         if (_localPlayer == null) return;
 
         switch (action)
         {
             case StationActionType.Pickup:
+                if (StationType == StationType.PlateSource)
+                    _localPlayer.SetHeldPlate(true);
+                else
+                    _localPlayer.SetHeldIngredient(true);
+                break;
+
             case StationActionType.Collect:
-                _localPlayer.SetHeldItem(true);
+                bool collectingPlate = _lastKnownState?.HasPlate == true;
+                if (collectingPlate)
+                    _localPlayer.SetHeldPlate(true, _lastKnownState?.PlateContents != null
+                        ? new System.Collections.Generic.List<string>(_lastKnownState.PlateContents)
+                        : null);
+                else
+                    _localPlayer.SetHeldIngredient(true);
                 break;
 
             case StationActionType.Deposit:
             case StationActionType.Deliver:
-                _localPlayer.SetHeldItem(false);
+                _localPlayer.SetHeldIngredient(false);
+                _localPlayer.SetHeldPlate(false);
                 break;
 
-            // BeginPrep and CancelPrep don't change held item state
+            case StationActionType.AddToPlate:
+                _localPlayer.SetHeldIngredient(false);
+                break;
         }
     }
 
@@ -158,34 +195,44 @@ public partial class Station : Area2D
     {
         if (_localPlayer == null) return null;
 
-        bool playerHasItem   = _localPlayer.HasHeldItem;
-        bool stationHasItem  = _lastKnownState?.HeldIngredient != null;
-        bool stationComplete = _lastKnownState?.ProgressNormalized >= 1f;
-        bool stationOccupied = _lastKnownState?.IsOccupied ?? false;
+        bool playerHasIngredient  = _localPlayer.HasHeldItem;
+        bool playerHasPlate       = _localPlayer.HasPlate;
+        bool playerHasAnything    = playerHasIngredient || playerHasPlate;
+
+        bool stationHasIngredient = _lastKnownState?.HeldIngredient != null;
+        bool stationHasPlate      = _lastKnownState?.HasPlate == true;
+        bool stationHasAnything   = stationHasIngredient || stationHasPlate;
+
+        bool stationComplete  = _lastKnownState?.ProgressNormalized >= 1f;
+        bool stationOccupied  = _lastKnownState?.IsOccupied ?? false;
 
         return StationType switch
         {
             StationType.IngredientSource =>
-                !playerHasItem ? StationActionType.Pickup : null,
+                !playerHasAnything ? StationActionType.Pickup : null,
+
+            StationType.PlateSource =>
+                !playerHasAnything ? StationActionType.Pickup : null,
 
             StationType.Counter =>
-                playerHasItem && !stationHasItem ? StationActionType.Deposit :
-                !playerHasItem && stationHasItem ? StationActionType.Collect :
+                playerHasIngredient && stationHasPlate   ? StationActionType.AddToPlate :
+                playerHasAnything && !stationHasAnything ? StationActionType.Deposit    :
+                !playerHasAnything && stationHasAnything ? StationActionType.Collect    :
                 null,
 
             StationType.ChoppingBoard =>
-                stationComplete && !playerHasItem                                          ? StationActionType.Collect  :
-                playerHasItem && !stationHasItem                                           ? StationActionType.Deposit  :
-                stationHasItem && !stationComplete && !stationOccupied && !playerHasItem   ? StationActionType.BeginPrep :
+                stationComplete && !playerHasAnything                                              ? StationActionType.Collect  :
+                playerHasIngredient && !stationHasAnything                                         ? StationActionType.Deposit  :
+                stationHasIngredient && !stationComplete && !stationOccupied && !playerHasAnything ? StationActionType.BeginPrep :
                 null,
 
             StationType.Stove =>
-                stationComplete && !playerHasItem ? StationActionType.Collect :
-                playerHasItem && !stationHasItem  ? StationActionType.Deposit :
+                stationComplete && !playerHasAnything      ? StationActionType.Collect :
+                playerHasIngredient && !stationHasAnything ? StationActionType.Deposit :
                 null,
 
             StationType.DeliveryCounter =>
-                playerHasItem ? StationActionType.Deliver : null,
+                playerHasPlate ? StationActionType.Deliver : null,
 
             _ => null
         };
@@ -208,6 +255,7 @@ public partial class Station : Area2D
             StationActionType.CancelPrep => "[E] Cancel",
             StationActionType.Collect    => "[E] Collect",
             StationActionType.Deliver    => "[E] Deliver",
+            StationActionType.AddToPlate => "[E] Add to plate",
             _ => "[E]"
         };
         _actionHint.Visible = true;

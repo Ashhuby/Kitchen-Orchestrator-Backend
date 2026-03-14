@@ -25,10 +25,10 @@ namespace KitchenOrchestrator.GameServer.Services
             IHubContext<GameHub> hubContext,
             ILogger<GameLoopService> logger)
         {
-            _sessionService = sessionService;
+            _sessionService   = sessionService;
             _submissionService = submissionService;
-            _hubContext = hubContext;
-            _logger = logger;
+            _hubContext       = hubContext;
+            _logger           = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,14 +37,8 @@ namespace KitchenOrchestrator.GameServer.Services
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                try
-                {
-                    await TickAllSessionsAsync();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error during game loop tick.");
-                }
+                try { await TickAllSessionsAsync(); }
+                catch (Exception ex) { _logger.LogError(ex, "Error during game loop tick."); }
 
                 await Task.Delay(TickDelayMs, stoppingToken);
             }
@@ -111,14 +105,11 @@ namespace KitchenOrchestrator.GameServer.Services
             if (activeCount >= levelDef.MaxSimultaneousOrders) return;
 
             float progress = 1f - (session.TimeRemainingSeconds / levelDef.DurationSeconds);
-            var recipe = OrderGenerator.Generate(progress);
-            var newOrder = new ActiveOrder(recipe, 60f);
+            var recipe     = OrderGenerator.Generate(progress);
+            var newOrder   = new ActiveOrder(recipe, 60f);
             newOrder.Status = OrderStatus.InProgress;
 
-            lock (session.Orders)
-            {
-                session.Orders.Add(newOrder);
-            }
+            lock (session.Orders) { session.Orders.Add(newOrder); }
 
             session.TimeSinceLastOrderSpawn = 0f;
             _logger.LogInformation("Spawned order {Recipe} in session {SessionId}.", recipe.Name, session.SessionId);
@@ -130,8 +121,9 @@ namespace KitchenOrchestrator.GameServer.Services
         {
             foreach (var station in session.Stations.Values)
             {
-                if (station.Type == StationType.Counter ||
+                if (station.Type == StationType.Counter      ||
                     station.Type == StationType.IngredientSource ||
+                    station.Type == StationType.PlateSource  ||
                     station.Type == StationType.DeliveryCounter)
                     continue;
 
@@ -146,7 +138,6 @@ namespace KitchenOrchestrator.GameServer.Services
             session.State = MatchState.Completed;
             _logger.LogInformation("Match {SessionId} completed.", session.SessionId);
 
-            // Send the final state with State = "Completed" so clients transition out
             await BroadcastMatchStateAsync(session);
 
             _ = Task.Run(async () =>
@@ -163,25 +154,68 @@ namespace KitchenOrchestrator.GameServer.Services
 
         private async Task BroadcastMatchStateAsync(MatchSession session)
         {
-            var players = session.Players
-                .Select(p => new PlayerPositionDto(p.PlayerId, p.DisplayName, p.X, p.Y))
-                .ToList()
-                .AsReadOnly();
+            var players = session.Players.Select(p =>
+            {
+                string? heldItemType      = null;
+                string? heldIngredient    = null;
+                IReadOnlyList<string>? heldPlateContents = null;
 
-            var stations = session.Stations.Values
-                .Select(s => new StationStateDto(
+                if (p.HeldItem != null)
+                {
+                    if (p.HeldItem.IsIngredient)
+                    {
+                        heldItemType   = "Ingredient";
+                        heldIngredient = p.HeldItem.Ingredient.ToString();
+                    }
+                    else
+                    {
+                        heldItemType      = "Plate";
+                        heldPlateContents = p.HeldItem.Plate!.Contents
+                            .Select(i => i.ToString()).ToList().AsReadOnly();
+                    }
+                }
+
+                return new PlayerPositionDto(
+                    p.PlayerId, p.DisplayName, p.X, p.Y,
+                    heldItemType, heldIngredient, heldPlateContents);
+            }).ToList().AsReadOnly();
+
+            var stations = session.Stations.Values.Select(s =>
+            {
+                string? heldIngredient = null;
+                string? prepState      = null;
+                bool hasPlate          = false;
+                IReadOnlyList<string>? plateContents = null;
+
+                if (s.HeldItem != null)
+                {
+                    if (s.HeldItem.IsIngredient)
+                    {
+                        heldIngredient = s.HeldItem.Ingredient.ToString();
+                        prepState      = s.HeldItem.PrepState.ToString();
+                    }
+                    else
+                    {
+                        hasPlate      = true;
+                        plateContents = s.HeldItem.Plate!.Contents
+                            .Select(i => i.ToString()).ToList().AsReadOnly();
+                    }
+                }
+
+                return new StationStateDto(
                     s.StationId,
                     s.Type.ToString(),
-                    s.HeldItem?.Ingredient.ToString(),
-                    s.HeldItem?.PrepState.ToString(),
+                    heldIngredient,
+                    prepState,
                     s.ProgressNormalized,
-                    s.OccupyingPlayerId != null))
-                .ToList()
-                .AsReadOnly();
+                    s.OccupyingPlayerId != null,
+                    hasPlate,
+                    plateContents);
+            }).ToList().AsReadOnly();
 
             var state = new MatchStateDto(
                 session.SessionId,
-                session.State.ToString(),   // "Active", "Completed", "Abandoned"
+                session.State.ToString(),
                 players,
                 stations,
                 session.TimeRemainingSeconds,

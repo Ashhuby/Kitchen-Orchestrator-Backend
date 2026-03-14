@@ -51,7 +51,7 @@
     public record LobbyPlayerDto(Guid PlayerId, string DisplayName, bool IsReady, bool IsHost);
     public record LobbyStateDto(Guid SessionId, string? LevelId, IReadOnlyList<LobbyPlayerDto> Players);
 
-    // ── Station Layout (host → server on MatchStarted) ────────────────────────
+    // ── Station Layout ────────────────────────────────────────────────────────
     public record StationLayoutDto(
         string StationId,
         string StationType,
@@ -68,15 +68,35 @@
     public record DeliveryResult(bool Success, int ScoreAwarded, bool IsPerfect, string? FailureReason);
 
     // ── In-Match: State Broadcast ─────────────────────────────────────────────
-    public record PlayerPositionDto(Guid PlayerId, string DisplayName, float X, float Y);
 
+    /// <summary>
+    /// Per-player state. HeldItemType is one of: null, "Ingredient", "Plate".
+    /// HeldIngredient is set when HeldItemType == "Ingredient".
+    /// HeldPlateContents is set when HeldItemType == "Plate".
+    /// </summary>
+    public record PlayerPositionDto(
+        Guid PlayerId,
+        string DisplayName,
+        float X,
+        float Y,
+        string? HeldItemType,                           // null | "Ingredient" | "Plate"
+        string? HeldIngredient,                         // Ingredient enum name, set when HeldItemType == "Ingredient"
+        IReadOnlyList<string>? HeldPlateContents);      // Ingredient enum names on plate, set when HeldItemType == "Plate"
+
+    /// <summary>
+    /// Per-station state. A station holds either an ingredient item or a plate, never both.
+    /// HasPlate and PlateContents describe the plate path.
+    /// HeldIngredient and PrepState describe the ingredient path.
+    /// </summary>
     public record StationStateDto(
         string StationId,
         string StationType,
-        string? HeldIngredient,
-        string? PrepState,
+        string? HeldIngredient,                         // set when station holds a raw/chopped/cooked ingredient
+        string? PrepState,                              // ItemPrepState enum name
         float ProgressNormalized,
-        bool IsOccupied);
+        bool IsOccupied,
+        bool HasPlate,                                  // true when a plate is sitting on this station
+        IReadOnlyList<string>? PlateContents);          // ingredient names on the plate, null if no plate
 
     public record ActiveOrderDto(
         Guid OrderId,
@@ -89,7 +109,7 @@
 
     public record MatchStateDto(
         Guid SessionId,
-        string State,                              // MatchState enum name: "Active", "Completed", "Abandoned"
+        string State,
         IReadOnlyList<PlayerPositionDto> Players,
         IReadOnlyList<StationStateDto> Stations,
         float TimeRemaining,
